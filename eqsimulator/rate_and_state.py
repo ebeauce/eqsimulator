@@ -644,13 +644,6 @@ class RateStateFaultPatch(object):
                 + self.shear_stress_rate * first_guess_time
                 - self.steady_state_friction(first_guess_time)
             )
-        #Psi = lambda t: (
-        #    (self.shear_stress + self.shear_stress_rate * t)
-        #    - self.steady_state_friction(t)
-        #)
-        #opt_output, cov = leastsq(Psi, first_guess_time)
-        #t0_1 = opt_output[0]
-
         try:
             t0_1 = newton(
                     self.newton_log_f, np.log(first_guess_time / 10.), #fprime=self.newton_fprime
@@ -673,21 +666,6 @@ class RateStateFaultPatch(object):
             opt_output, cov = leastsq(Psi, np.log(first_guess_time / 10.))
             t0_1 = opt_output[0]
             t0_1 = np.exp(t0_1)
-        #diff = t0_1 - opt_output[0]
-        #print(f"Diff between the two methods: {100.*diff/t0_1:.2f}%")
-        #Dlst = (
-        #    self.shear_stress + self.shear_stress_rate * t0_1
-        #) - self.steady_state_friction(t0_1)
-        #if np.abs(Dlst) > 0.0001 or t0_1 < 0.0:
-        #    # idea to try: rewrite the objective function so that the explored variable is log t instead of t
-        #    Psi = (
-        #        lambda t: (
-        #            (self.shear_stress + self.shear_stress_rate * t)
-        #            - self.steady_state_friction(t)
-        #        )
-        #        ** 2
-        #    )
-        #    opt_output = fmin(Psi, np.array([first_guess_time]), disp=False)
         if t0_1 < 0.0:
             #print(self.shear_stress / 1.e6, self.steady_state_friction(0.) / 1.e6)
             #return np.finfo(np.float64).max
@@ -1164,12 +1142,13 @@ class RateStateFault(object):
             print(t.min(), t)
         # print t.min()
         if t.min() < 0.0:
-            for idx in evolving_patch_indexes:
-                print(
-                    self.fault_patches[idx].state,
-                    self.fault_patches[idx].shear_stress / 1.0e6,
-                    self.fault_patches[idx].friction / 1.0e6,
-                )
+            # why does this happen??
+            #for idx in evolving_patch_indexes:
+            #    print(
+            #        self.fault_patches[idx].state,
+            #        self.fault_patches[idx].shear_stress / 1.0e6,
+            #        self.fault_patches[idx].friction / 1.0e6,
+            #    )
             t[t < 0.0] = 10.**(-DECIMAL_PRECISION)
         times = np.hstack(
             (t.min(), np.zeros(evolving_patch_indexes.size - 1, dtype=np.float64))
