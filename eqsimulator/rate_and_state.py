@@ -1,5 +1,6 @@
 import numpy as np
 import sys
+import concurrent.futures
 from scipy.optimize import fmin, leastsq
 from okada_wrapper import dc3dwrapper
 from time import time as give_time
@@ -712,9 +713,10 @@ class RateStateFaultPatch(object):
 
     def find_t3_1(self):
         """
-        Patches in state 3 are creeping. If the critical stiffness evolves above the patch stiffness,
-        then frictional instability is possible. Since a creeping patch is at steady state, it ends up
-        in state 1 when the stiffness condition is satisfied.
+        Patches in state 3 are creeping. If the critical stiffness evolves above
+        the patch stiffness, then frictional instability is possible. Since a
+        creeping patch is at steady state, it ends up in state 1 when the stiffness
+        condition is satisfied.
         """
         # critical time at which critical stiffness is equal to patch stiffness
         if self.normal_stress_rate == 0.0:
@@ -739,9 +741,9 @@ class RateStateFaultPatch(object):
 
     def find_tX_3(self):
         """
-        Patches in state 0 or 1 are unstable. If the critical stiffness evolves below the patch stiffness,
-        then the patch becomes stable and starts creeping. When the stiffness condition is satisfied, the patch
-        ends up in state 3.
+        Patches in state 0 or 1 are unstable. If the critical stiffness evolves below
+        the patch stiffness, then the patch becomes stable and starts creeping. When
+        the stiffness condition is satisfied, the patch ends up in state 3.
         """
         # critical time at which critical stiffness is equal to patch stiffness
         if self.normal_stress_rate == 0.0:
@@ -764,22 +766,29 @@ class RateStateFaultPatch(object):
                 # critical stiffness is an increasing function of time: the patch remains unstable
                 return np.finfo(np.float64).max
 
-    def find_t3_V_update(self, alpha=10.0):
+    def find_t3_V_update(self, V_V0_ratio=1.25):
+        """
+        ` ln V / V_0 = (shear_stress_rate * time) / (normal_stress * (a - b))`
+        For `V = n * V_0`, `time` is:
+        ` time = (normal_stress * (a - b) / shear_stress_rate) * ln(n) `
+        """
         # ---------------------------------------------------------------------------
         if self.shear_stress_rate == 0.0:
             return np.finfo(np.float64).max
         characteristic_time = (
             self.normal_stress * (self.a - self.b) / np.abs(self.shear_stress_rate)
         )
-        return max(2.0e-5, alpha * characteristic_time)
+        #if characteristic_time < (24. * 3600. * 365):
+        #    print("Short t3-3 time:", self.fault_patch_id, characteristic_time / (24. * 3600.), self.shear_stress_rate)
+        return max(2.0e-5, np.log(V_V0_ratio) * characteristic_time)
 
-    def find_t3_tau_update(self, alpha=1.0):
+    def find_t3_tau_update(self, num_tc=1.0):
         if self.shear_stress_rate == 0.0:
             return np.finfo(np.float64).max
         characteristic_time = (self.shear_stress / 100.0) / np.abs(
             self.shear_stress_rate
         )  # time to change shear stress of 1%
-        return max(2.0e-5, alpha * characteristic_time)
+        return max(2.0e-5, num_tc * characteristic_time)
 
     def update_H(self):
         self.H = -self.k / self.normal_stress + self.sum_term
@@ -888,13 +897,21 @@ class RateStateFault(object):
         neighboring_patches=None,
         verbose=True,
         ktau_tectonic=None,
-        a_reduction_factor=0.1
+        a_reduction_factor=0.1,
+        V_V0_ratio_for_update=1.25,
+        num_threads=1
     ):
         self.verbose = verbose
         self.n_patches = coords_fault_patches.shape[0]
         self.fault_patches = fault_patches
         self.coords = coords_fault_patches
         self.a_reduction_factor = a_reduction_factor
+        self.V_V0_ratio_for_update = V_V0_ratio_for_update
+        self.num_threads = num_threads
+        if self.num_threads != 1:
+            if self.num_threads in [0, None, "all"]:
+                # num_threads = None means use all CPUs
+                self.num_threads = None
         self.Kij_shear = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         self.Kij_normal = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         tectonic_slip_speeds = np.zeros(self.n_patches, dtype=np.float64)
@@ -1069,6 +1086,8 @@ class RateStateFault(object):
                 self.fault_patches[i].stable = True
                 self.fault_patches[i].state = 3
                 self.fault_patches[i].d_dot = self.fault_patches[i].tectonic_slip_speed
+                # ! set ktau_tectonic to 0 !
+                # when 
                 self.fault_patches[i].set_theta_to_steady_state()
                 self.fault_patches[i].set_friction_to_steady_state()
                 self.fault_patches[i].shear_stress = self.fault_patches[
@@ -1077,66 +1096,123 @@ class RateStateFault(object):
                 self.fault_patches[i].shear_stress_history[0] = self.fault_patches[
                     i
                 ].shear_stress
+                #extra_stressing = 0.
                 for j in range(self.n_patches):
                     # steady motion on patch i redistributes stress:
                     self.fault_patches[j].shear_stress_rate += (
                         self.fault_patches[i].tectonic_slip_speed * self.Kij_shear[i, j]
                     )
+                    #extra_stressing += self.fault_patches[i].tectonic_slip_speed * self.Kij_shear[i, j]
                     self.fault_patches[j].normal_stress_rate += (
                         self.fault_patches[i].tectonic_slip_speed
                         * self.Kij_normal[i, j]
                     )
                 print("Patch {:d} is stable.".format(i))
-                print(
-                    "Shear stressing rate = {:.2f}".format(
-                        self.fault_patches[i].shear_stress_rate
-                    )
-                )
+                #print(
+                #    "Shear stressing rate = {:.2f}".format(
+                #        self.fault_patches[i].shear_stress_rate
+                #    )
+                #)
+                #print(f"Extra stressing: {extra_stressing}")
                 self.fault_patches[i].d_dot_0 = np.float64(self.fault_patches[i].d_dot)
             else:
                 # unstable patch
                 self.fault_patches[i].stable = False
                 self.fault_patches[i].d_dot_0 = np.float64(self.fault_patches[i].d_dot)
         # ---------------------------------
-        self.time_jumps = np.zeros(0, dtype=np.float64)
+        #self.time_jumps = np.zeros(0, dtype=np.float64)
+
+    def _evolve_one_patch(self, patch_index):
+        fp = self.fault_patches[patch_index]
+        if self.locked_patches[patch_index]:
+            transition_time = np.finfo(np.float64).max
+        else:
+            if fp.state == 0:
+                t0_1 = fp.find_t0_1()
+                t0_3 = fp.find_tX_3()
+                if t0_1 < t0_3:
+                    fp.next_state = 1
+                    transition_time = t0_1
+                else:
+                    fp.next_state = 3
+                    transition_time = t0_3
+            elif fp.state == 1:
+                t1_2 = fp.find_t1_2()
+                t1_3 = fp.find_tX_3()
+                if t1_2 < t1_3:
+                    fp.next_state = 2
+                    transition_time = t1_2
+                else:
+                    fp.next_state = 3
+                    transition_time = t1_3
+            elif fp.state == 2:
+                transition_time = fp.find_t2_0()
+                fp.next_state = 0
+            else:
+                t3_1 = fp.find_t3_1()
+                t3_3 = fp.find_t3_V_update(
+                        V_V0_ratio=self.V_V0_ratio_for_update
+                        )
+                #t3_3 = fp.find_t3_tau_update(num_tc=1.0)
+                if t3_3 < t3_1:
+                    fp.next_state = 3
+                    transition_time = t3_3
+                else:
+                    fp.next_state = 1
+                    transition_time = t3_1
+        fp._transition_time = transition_time
+
 
     def evolve_next_patch(self):
         t = np.zeros(self.n_patches, dtype=np.float64)
-        for i in range(self.n_patches):
-            if self.locked_patches[i]:
-                t[i] = np.finfo(np.float64).max
-                continue
-            if self.fault_patches[i].state == 0:
-                t0_1 = self.fault_patches[i].find_t0_1()
-                t0_3 = self.fault_patches[i].find_tX_3()
-                if t0_1 < t0_3:
-                    self.fault_patches[i].next_state = 1
-                    t[i] = t0_1
-                else:
-                    self.fault_patches[i].next_state = 3
-                    t[i] = t0_3
-            elif self.fault_patches[i].state == 1:
-                t1_2 = self.fault_patches[i].find_t1_2()
-                t1_3 = self.fault_patches[i].find_tX_3()
-                if t1_2 < t1_3:
-                    self.fault_patches[i].next_state = 2
-                    t[i] = t1_2
-                else:
-                    self.fault_patches[i].next_state = 3
-                    t[i] = t1_3
-            elif self.fault_patches[i].state == 2:
-                t[i] = self.fault_patches[i].find_t2_0()
-                self.fault_patches[i].next_state = 0
-            else:
-                t3_1 = self.fault_patches[i].find_t3_1()
-                t3_3 = self.fault_patches[i].find_t3_V_update(alpha=1.0)
-                if t3_3 < t3_1:
-                    self.fault_patches[i].next_state = 3
-                    t[i] = t3_3
-                else:
-                    self.fault_patches[i].next_state = 1
-                    t[i] = t3_1
+        if self.num_threads != 1:
+            chunksize = int(self.n_patches // self.num_threads + 1)
+            #with concurrent.futures.ThreadPoolExecutor(
+            with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=self.num_threads
+                    ) as executor:
+                output = list(
+                        executor.map(self._evolve_one_patch, range(self.n_patches))
+                        )
+        else:
+            for i in range(self.n_patches):
+                self._evolve_one_patch(i)
+                #if self.locked_patches[i]:
+                #    t[i] = np.finfo(np.float64).max
+                #    continue
+                #if self.fault_patches[i].state == 0:
+                #    t0_1 = self.fault_patches[i].find_t0_1()
+                #    t0_3 = self.fault_patches[i].find_tX_3()
+                #    if t0_1 < t0_3:
+                #        self.fault_patches[i].next_state = 1
+                #        t[i] = t0_1
+                #    else:
+                #        self.fault_patches[i].next_state = 3
+                #        t[i] = t0_3
+                #elif self.fault_patches[i].state == 1:
+                #    t1_2 = self.fault_patches[i].find_t1_2()
+                #    t1_3 = self.fault_patches[i].find_tX_3()
+                #    if t1_2 < t1_3:
+                #        self.fault_patches[i].next_state = 2
+                #        t[i] = t1_2
+                #    else:
+                #        self.fault_patches[i].next_state = 3
+                #        t[i] = t1_3
+                #elif self.fault_patches[i].state == 2:
+                #    t[i] = self.fault_patches[i].find_t2_0()
+                #    self.fault_patches[i].next_state = 0
+                #else:
+                #    t3_1 = self.fault_patches[i].find_t3_1()
+                #    t3_3 = self.fault_patches[i].find_t3_V_update(alpha=1.0)
+                #    if t3_3 < t3_1:
+                #        self.fault_patches[i].next_state = 3
+                #        t[i] = t3_3
+                #    else:
+                #        self.fault_patches[i].next_state = 1
+                #        t[i] = t3_1
+        t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
+        #print(t / (24. * 3600.))
         evolving_patch_indexes = np.where(t == t.min())[0]
         if len(evolving_patch_indexes) == 0:
             print(t.min(), t)
@@ -1155,7 +1231,7 @@ class RateStateFault(object):
         )
         print_update_message = True
         for i, evolving_patch_idx in enumerate(evolving_patch_indexes):
-            self.time_jumps = np.hstack((self.time_jumps, times[i]))
+            #self.time_jumps = np.hstack((self.time_jumps, times[i]))
             state_0 = self.fault_patches[evolving_patch_idx].state
             if (self.fault_patches[evolving_patch_idx].state == 0) and (
                 self.fault_patches[evolving_patch_idx].next_state == 1
@@ -1180,7 +1256,7 @@ class RateStateFault(object):
                 self.fault_patches[evolving_patch_idx].next_state == 3
             ):
                 self.update_all_state_33(evolving_patch_idx, times[i])
-                print_update_message = False
+                #print_update_message = False
             elif (self.fault_patches[evolving_patch_idx].state == 3) and (
                 self.fault_patches[evolving_patch_idx].next_state == 1
             ):
@@ -1194,12 +1270,12 @@ class RateStateFault(object):
                         times[i],
                     )
                 )
-        for j in range(self.n_patches):
-            if self.fault_patches[j].shear_stress_rate < 1.0:
-                self.fault_patches[j].shear_stress_rate = np.round(
-                    self.fault_patches[j].shear_stress_rate,
-                    decimals=DECIMAL_PRECISION
-                )
+        #for j in range(self.n_patches):
+        #    if self.fault_patches[j].shear_stress_rate < 1.0:
+        #        self.fault_patches[j].shear_stress_rate = np.round(
+        #            self.fault_patches[j].shear_stress_rate,
+        #            decimals=DECIMAL_PRECISION
+        #        )
 
     def update_all_state_01(self, evolving_patch_idx, t0_1):
         """
