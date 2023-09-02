@@ -899,7 +899,6 @@ class RateStateFault(object):
         ktau_tectonic=None,
         a_reduction_factor=0.1,
         V_V0_ratio_for_update=1.25,
-        num_threads=1
     ):
         self.verbose = verbose
         self.n_patches = coords_fault_patches.shape[0]
@@ -907,11 +906,6 @@ class RateStateFault(object):
         self.coords = coords_fault_patches
         self.a_reduction_factor = a_reduction_factor
         self.V_V0_ratio_for_update = V_V0_ratio_for_update
-        self.num_threads = num_threads
-        if self.num_threads != 1:
-            if self.num_threads in [0, None, "all"]:
-                # num_threads = None means use all CPUs
-                self.num_threads = None
         self.Kij_shear = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         self.Kij_normal = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         tectonic_slip_speeds = np.zeros(self.n_patches, dtype=np.float64)
@@ -1164,52 +1158,41 @@ class RateStateFault(object):
 
 
     def evolve_next_patch(self):
-        t = np.zeros(self.n_patches, dtype=np.float64)
-        if self.num_threads != 1:
-            chunksize = int(self.n_patches // self.num_threads + 1)
-            #with concurrent.futures.ThreadPoolExecutor(
-            with concurrent.futures.ProcessPoolExecutor(
-                    max_workers=self.num_threads
-                    ) as executor:
-                output = list(
-                        executor.map(self._evolve_one_patch, range(self.n_patches))
-                        )
-        else:
-            for i in range(self.n_patches):
-                self._evolve_one_patch(i)
-                #if self.locked_patches[i]:
-                #    t[i] = np.finfo(np.float64).max
-                #    continue
-                #if self.fault_patches[i].state == 0:
-                #    t0_1 = self.fault_patches[i].find_t0_1()
-                #    t0_3 = self.fault_patches[i].find_tX_3()
-                #    if t0_1 < t0_3:
-                #        self.fault_patches[i].next_state = 1
-                #        t[i] = t0_1
-                #    else:
-                #        self.fault_patches[i].next_state = 3
-                #        t[i] = t0_3
-                #elif self.fault_patches[i].state == 1:
-                #    t1_2 = self.fault_patches[i].find_t1_2()
-                #    t1_3 = self.fault_patches[i].find_tX_3()
-                #    if t1_2 < t1_3:
-                #        self.fault_patches[i].next_state = 2
-                #        t[i] = t1_2
-                #    else:
-                #        self.fault_patches[i].next_state = 3
-                #        t[i] = t1_3
-                #elif self.fault_patches[i].state == 2:
-                #    t[i] = self.fault_patches[i].find_t2_0()
-                #    self.fault_patches[i].next_state = 0
-                #else:
-                #    t3_1 = self.fault_patches[i].find_t3_1()
-                #    t3_3 = self.fault_patches[i].find_t3_V_update(alpha=1.0)
-                #    if t3_3 < t3_1:
-                #        self.fault_patches[i].next_state = 3
-                #        t[i] = t3_3
-                #    else:
-                #        self.fault_patches[i].next_state = 1
-                #        t[i] = t3_1
+        for i in range(self.n_patches):
+            self._evolve_one_patch(i)
+            #if self.locked_patches[i]:
+            #    t[i] = np.finfo(np.float64).max
+            #    continue
+            #if self.fault_patches[i].state == 0:
+            #    t0_1 = self.fault_patches[i].find_t0_1()
+            #    t0_3 = self.fault_patches[i].find_tX_3()
+            #    if t0_1 < t0_3:
+            #        self.fault_patches[i].next_state = 1
+            #        t[i] = t0_1
+            #    else:
+            #        self.fault_patches[i].next_state = 3
+            #        t[i] = t0_3
+            #elif self.fault_patches[i].state == 1:
+            #    t1_2 = self.fault_patches[i].find_t1_2()
+            #    t1_3 = self.fault_patches[i].find_tX_3()
+            #    if t1_2 < t1_3:
+            #        self.fault_patches[i].next_state = 2
+            #        t[i] = t1_2
+            #    else:
+            #        self.fault_patches[i].next_state = 3
+            #        t[i] = t1_3
+            #elif self.fault_patches[i].state == 2:
+            #    t[i] = self.fault_patches[i].find_t2_0()
+            #    self.fault_patches[i].next_state = 0
+            #else:
+            #    t3_1 = self.fault_patches[i].find_t3_1()
+            #    t3_3 = self.fault_patches[i].find_t3_V_update(alpha=1.0)
+            #    if t3_3 < t3_1:
+            #        self.fault_patches[i].next_state = 3
+            #        t[i] = t3_3
+            #    else:
+            #        self.fault_patches[i].next_state = 1
+            #        t[i] = t3_1
         t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
         #print(t / (24. * 3600.))
