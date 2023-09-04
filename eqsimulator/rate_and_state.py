@@ -455,9 +455,13 @@ class RateStateFaultPatch(object):
                 # self.set_friction_to_steady_state() # update necessary if normal stress has changed
             elif self.state == 3:
                 self.d_dot_0 = np.float64(self.d_dot)
-                self.d_dot = self.d_dot_star * np.exp(
-                    (self.shear_stress / self.normal_stress - self.mu_0)
-                    / (self.a - self.b)
+                self.d_dot = min(
+                    self.d_dot_EQ,
+                    self.d_dot_star
+                    * np.exp(
+                        (self.shear_stress / self.normal_stress - self.mu_0)
+                        / (self.a - self.b)
+                    ),
                 )
             self.update_H()
             if self.record_history:
@@ -1118,15 +1122,17 @@ class RateStateFault(object):
 
     @property
     def shear_stress(self):
-        return sum(
-                fp.shear_stress * fp.area for fp in self.fault_patches
-                ) / self.fault_area
+        return (
+            sum(fp.shear_stress * fp.area for fp in self.fault_patches)
+            / self.fault_area
+        )
 
     @property
     def normal_stress(self):
-        return sum(
-                fp.normal_stress * fp.area for fp in self.fault_patches
-                ) / self.fault_area
+        return (
+            sum(fp.normal_stress * fp.area for fp in self.fault_patches)
+            / self.fault_area
+        )
 
     def _evolve_one_patch(self, patch_index):
         fp = self.fault_patches[patch_index]
