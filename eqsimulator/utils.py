@@ -104,9 +104,9 @@ def get_event_history(fault):
     catalog = np.float64(list_events)  # timings and locations = earthquake catalog
     catalog = catalog[catalog[:, -1] > 0.0, :]
     catalog = pd.DataFrame(
-            data=np.asarray(catalog),
-            columns=["event_time", "patch_id", "x", "y", "z", "slip"]
-            )
+        data=np.asarray(catalog),
+        columns=["event_time", "patch_id", "x", "y", "z", "slip"],
+    )
     return catalog
 
 
@@ -126,191 +126,179 @@ def local_catalog(catalog, fault, patch_index, R=500.0):
     local_cat = np.float64(local_cat)
     return local_cat
 
-#def define_events(catalog, time_threshold, distance_threshold):
-#    # work with a copy of catalog for in-place changes
-#    catalog = catalog.copy()
-#    events = []
-#    visited_events = []
-#    for i in catalog.index:
-#        if i in visited_events:
-#            continue
-#        # print('{:d}/{:d}'.format(i+1, catalog.shape[0]))
-#        dT = np.abs(catalog["event_time"] - catalog.loc[i, "event_time"]).values
-#        dX = np.abs(catalog["x"] - catalog.loc[i, "x"]).values
-#        # dY = np.abs(catalog[:,3] - catalog[i,3])
-#        # dZ = np.abs(catalog[:,4] - catalog[i,4])
-#        # candidates = np.where(dT < time_threshold)[0]
-#        # candidates = np.delete(candidates, np.where(candidates == i)[0][0])
-#        visited_events.append(i)
-#        candidates = np.setdiff1d(
-#            catalog.index[
-#                np.where((dT < time_threshold) & (dX < distance_threshold))[0]
-#                ],
-#            np.int32(visited_events),
-#        )
-#        group = [i]
-#        if candidates.size == 0:
-#            events.append(
-#                    catalog.loc[group]
-#                    )
-#            # visited_events.append(i)
-#            catalog.drop(labels=group, axis="index", inplace=True)
-#            continue
-#        for k in range(candidates.size):
-#            D = np.linalg.norm(
-#                catalog.loc[candidates[k], ["x", "y", "z"]].values
-#                -
-#                catalog.loc[i, ["x", "y", "z"]].values
-#            )
-#            if D < distance_threshold:
-#                group.append(candidates[k])
-#        # visited_events.append(i)
-#        new_events = True
-#        n0 = 0
-#        n1 = 0
-#        while new_events:
-#            new_events = False
-#            n1 = len(group)
-#            for event_idx in group[n0:]:
-#                # print('----> {:d}'.format(event_idx))
-#                #dT = np.abs(catalog[:, 0] - catalog[event_idx, 0])
-#                #dX = np.abs(catalog[:, 2] - catalog[event_idx, 2])
-#                dT = np.abs(
-#                        catalog["event_time"] - catalog.loc[event_idx, "event_time"]
-#                        ).values
-#                dX = np.abs(
-#                        catalog["x"] - catalog.loc[event_idx, "x"]
-#                        ).values
-#                # candidates = np.where(dT < time_threshold)[0]
-#                # candidates = np.delete(candidates, np.where(candidates == event_idx)[0][0])
-#                visited_events.append(event_idx)
-#                candidates = np.setdiff1d(
-#                    catalog.index[
-#                        np.where((dT < time_threshold) & (dX < distance_threshold))[0]
-#                        ],
-#                    np.int32(visited_events),
-#                )
-#                for k in range(candidates.size):
-#                    if (
-#                        (candidates[k] in visited_events)
-#                        or (candidates[k] == event_idx)
-#                        or (candidates[k] in group)
-#                    ):
-#                        continue
-#                    D = np.linalg.norm(
-#                        catalog.loc[candidates[k], ["x", "y", "z"]].values
-#                        -
-#                        catalog.loc[event_idx, ["x", "y", "z"]].values
-#                    )
-#                    if D < distance_threshold:
-#                        group.append(candidates[k])
-#                        new_events = True
-#                # visited_events.append(event_idx)
-#            n0 = int(n1)
-#        #metadata_events = []
-#        #for event_idx in np.unique(np.int32(group)):
-#        #    metadata_events.append(catalog[event_idx, :])
-#        events.append(
-#                catalog.loc[np.unique(group)]
-#                )
-#        catalog.drop(labels=group, axis="index", inplace=True)
-#    print(
-#        "{:d} events ({:d} single events)".format(
-#            len(events), len(catalog)
-#        )
-#    )
-#    return events
 
 def define_events(catalog, time_threshold, distance_threshold):
-    events = []
-    visited_events = set()
-    for i in catalog.index:
-        if i in visited_events:
-            continue
-        # print('{:d}/{:d}'.format(i+1, catalog.shape[0]))
-        dT = np.abs(catalog["event_time"] - catalog.loc[i, "event_time"]).values
-        dX = np.abs(catalog["x"] - catalog.loc[i, "x"]).values
-        # dY = np.abs(catalog[:,3] - catalog[i,3])
-        # dZ = np.abs(catalog[:,4] - catalog[i,4])
-        # candidates = np.where(dT < time_threshold)[0]
-        # candidates = np.delete(candidates, np.where(candidates == i)[0][0])
-        visited_events.add(i)
-        #candidates = np.setdiff1d(
-        #    catalog.index[
-        #        np.where((dT < time_threshold) & (dX < distance_threshold))[0]
-        #        ],
-        #    np.int32(visited_events),
-        #)
-        candidates = set(catalog.index[
-                        np.where((dT < time_threshold) & (dX < distance_threshold))[0]
-                        ]).difference(visited_events)
-        group = [i]
-        if len(candidates) == 0:
-            events.append(
-                    catalog.loc[group]
-                    )
-            # visited_events.append(i)
-            continue
-        for can in candidates:
-            D = np.linalg.norm(
-                catalog.loc[can, ["x", "y", "z"]].values
-                -
-                catalog.loc[i, ["x", "y", "z"]].values
-            )
-            if D < distance_threshold:
-                group.append(can)
-        # visited_events.append(i)
-        new_events = True
-        n0 = 0
-        n1 = 0
-        while new_events:
-            new_events = False
-            n1 = len(group)
-            for event_idx in group[n0:]:
-                # print('----> {:d}'.format(event_idx))
-                #dT = np.abs(catalog[:, 0] - catalog[event_idx, 0])
-                #dX = np.abs(catalog[:, 2] - catalog[event_idx, 2])
-                dT = np.abs(
-                        catalog["event_time"] - catalog.loc[event_idx, "event_time"]
-                        ).values
-                dX = np.abs(
-                        catalog["x"] - catalog.loc[event_idx, "x"]
-                        ).values
-                # candidates = np.where(dT < time_threshold)[0]
-                # candidates = np.delete(candidates, np.where(candidates == event_idx)[0][0])
-                visited_events.add(event_idx)
-                candidates = set(catalog.index[
-                                np.where((dT < time_threshold) & (dX < distance_threshold))[0]
-                                ]).difference(visited_events)
-                for can in candidates:
-                    if (
-                        (can in visited_events)
-                        or (can == event_idx)
-                        or (can in group)
-                    ):
-                        continue
-                    D = np.linalg.norm(
-                        catalog.loc[can, ["x", "y", "z"]].values
-                        -
-                        catalog.loc[event_idx, ["x", "y", "z"]].values
-                    )
-                    if D < distance_threshold:
-                        group.append(can)
-                        new_events = True
-                # visited_events.append(event_idx)
-            n0 = int(n1)
-        #metadata_events = []
-        #for event_idx in np.unique(np.int32(group)):
-        #    metadata_events.append(catalog[event_idx, :])
-        events.append(
-                catalog.loc[np.unique(group)]
-                )
-    print(
-        "{:d} events ({:d} single events)".format(
-            len(events), len(catalog)
-        )
+   events = []
+   visited_events = set()
+   for i in catalog.index:
+       if i in visited_events:
+           continue
+       # print('{:d}/{:d}'.format(i+1, catalog.shape[0]))
+       dT = np.abs(catalog["event_time"] - catalog.loc[i, "event_time"]).values
+       dX = np.abs(catalog["x"] - catalog.loc[i, "x"]).values
+       visited_events.add(i)
+       candidates = set(catalog.index[
+                       np.where((dT < time_threshold) & (dX < distance_threshold))[0]
+                       ]).difference(visited_events)
+       group = [i]
+       if len(candidates) == 0:
+           events.append(
+                   catalog.loc[group]
+                   )
+           continue
+       for can in candidates:
+           D = np.linalg.norm(
+               catalog.loc[can, ["x", "y", "z"]].values
+               -
+               catalog.loc[i, ["x", "y", "z"]].values
+           )
+           if D < distance_threshold:
+               group.append(can)
+       new_events = True
+       n0 = 0
+       n1 = 0
+       while new_events:
+           new_events = False
+           n1 = len(group)
+           for event_idx in group[n0:]:
+               # print('----> {:d}'.format(event_idx))
+               dT = np.abs(
+                       catalog["event_time"] - catalog.loc[event_idx, "event_time"]
+                       ).values
+               dX = np.abs(
+                       catalog["x"] - catalog.loc[event_idx, "x"]
+                       ).values
+               visited_events.add(event_idx)
+               candidates = set(catalog.index[
+                               np.where((dT < time_threshold) & (dX < distance_threshold))[0]
+                               ]).difference(visited_events)
+               for can in candidates:
+                   if (
+                       (can in visited_events)
+                       or (can == event_idx)
+                       or (can in group)
+                   ):
+                       continue
+                   D = np.linalg.norm(
+                       catalog.loc[can, ["x", "y", "z"]].values
+                       -
+                       catalog.loc[event_idx, ["x", "y", "z"]].values
+                   )
+                   if D < distance_threshold:
+                       group.append(can)
+                       new_events = True
+           n0 = int(n1)
+       events.append(
+               catalog.loc[np.unique(group)]
+               )
+   print(
+       "{:d} events ({:d} single events)".format(
+           len(events), len(catalog)
+       )
+   )
+   return events
+
+# ChatGPT suggestion
+
+
+def calculate_distance(point1, point2):
+    """
+    Calculate the Euclidean distance between two 3D points.
+
+    Parameters:
+    -----------
+    point1 : array-like
+        Coordinates of the first point (x, y, z).
+    point2 : array-like
+        Coordinates of the second point (x, y, z).
+
+    Returns:
+    --------
+    float
+        Euclidean distance between the two points.
+    """
+    return np.linalg.norm(np.array(point1) - np.array(point2))
+
+
+def find_event_neighbors(catalog, event_index, time_threshold, distance_threshold):
+    """
+    Find neighboring events for a given event based on time and distance thresholds.
+
+    Parameters:
+    -----------
+    catalog : pandas.DataFrame
+        DataFrame containing event data with columns 'event_time', 'x', 'y', 'z'.
+    event_index : int
+        Index of the event for which neighbors are to be found.
+    time_threshold : float
+        Time threshold for considering events as neighbors (in seconds).
+    distance_threshold : float
+        Distance threshold for considering events as neighbors.
+
+    Returns:
+    --------
+    set
+        Set of indices of neighboring events.
+    """
+    event = catalog.loc[event_index]
+    dT = np.abs(catalog["event_time"] - event["event_time"])
+    dX = np.linalg.norm(catalog[["x", "y", "z"]] - event[["x", "y", "z"]], axis=1)
+    neighbor_indices = set(
+        catalog.index[(dT < time_threshold) & (dX < distance_threshold)]
     )
-    return events
+    neighbor_indices.discard(event_index)  # Remove the event itself
+    return neighbor_indices
+
+
+#def define_events(catalog, time_threshold, distance_threshold):
+#    """
+#    Cluster events in a catalog based on time and distance thresholds.
+#
+#    Parameters:
+#    -----------
+#    catalog : pandas.DataFrame
+#        DataFrame containing event data with columns 'event_time', 'x', 'y', 'z'.
+#    time_threshold : float
+#        Time threshold for considering events as part of the same cluster (in seconds).
+#    distance_threshold : float
+#        Distance threshold for considering events as part of the same cluster.
+#
+#    Returns:
+#    --------
+#    list
+#        List of DataFrames, where each DataFrame represents a cluster of events.
+#    """
+#    if catalog.empty:
+#        return []
+#
+#    events = []
+#    visited_events = set()
+#
+#    for event_index in catalog.index:
+#        if event_index in visited_events:
+#            continue
+#
+#        cluster = [event_index]
+#        neighbors_to_check = [event_index]
+#
+#        while neighbors_to_check:
+#            current_event_index = neighbors_to_check.pop()
+#
+#            neighbors = find_event_neighbors(
+#                catalog, current_event_index, time_threshold, distance_threshold
+#            )
+#            neighbors.difference_update(visited_events, cluster)
+#
+#            cluster.extend(neighbors)
+#            neighbors_to_check.extend(neighbors)
+#
+#            visited_events.update(neighbors)
+#
+#        events.append(catalog.loc[cluster])
+#
+#    print(f"{len(events)} events ({len(catalog)} single events)")
+#    return events
+
 
 def build_catalog_from_metadata(events, metadata):
     seismic_moment = np.zeros(len(events), dtype=np.float64)
@@ -321,29 +309,29 @@ def build_catalog_from_metadata(events, metadata):
         event_time[i] = events[i]["event_time"].min()
         for j in events[i].index:
             seismic_moment[i] += (
-                    metadata["SHEAR_MODULUS_PA"]
-                    *
-                    metadata["STRIKE_WIDTH"]
-                    *
-                    metadata["DIP_WIDTH"]
-                    *
-                    events[i].loc[j, "slip"]
-                    )
+                metadata["SHEAR_MODULUS_PA"]
+                * metadata["STRIKE_WIDTH"]
+                * metadata["DIP_WIDTH"]
+                * events[i].loc[j, "slip"]
+            )
             rupture_area[i] += metadata["STRIKE_WIDTH"] * metadata["DIP_WIDTH"]
             average_slip[i] += (
-                    metadata["STRIKE_WIDTH"] * metadata["DIP_WIDTH"] * events[i].loc[j, "slip"]
-                    )
+                metadata["STRIKE_WIDTH"]
+                * metadata["DIP_WIDTH"]
+                * events[i].loc[j, "slip"]
+            )
         average_slip[i] /= rupture_area[i]
     catalog = pd.DataFrame(
-            {
-                "event_time" : event_time,
-                "average_slip" : average_slip,
-                "rupture_area" : rupture_area,
-                "seismic_moment" : seismic_moment,
-                "moment_magnitude" : moment_magnitude(seismic_moment),
-                }
-            )
+        {
+            "event_time": event_time,
+            "average_slip": average_slip,
+            "rupture_area": rupture_area,
+            "seismic_moment": seismic_moment,
+            "moment_magnitude": moment_magnitude(seismic_moment),
+        }
+    )
     return catalog
+
 
 def build_catalog_from_fault_instance(events, fault):
     seismic_moment = np.zeros(len(events), dtype=np.float64)
@@ -353,22 +341,20 @@ def build_catalog_from_fault_instance(events, fault):
     for i in range(len(seismic_moment)):
         event_time[i] = events[i]["event_time"].min()
         for j in events[i].index:
-            fp = fault.fault_patches[
-                    int(events[i].loc[j, "patch_id"])
-                    ]
+            fp = fault.fault_patches[int(events[i].loc[j, "patch_id"])]
             seismic_moment[i] += fp.G * fp.L * fp.W * events[i].loc[j, "slip"]
             rupture_area[i] += fp.L * fp.W
             average_slip[i] += fp.L * fp.W * events[i].loc[j, "slip"]
         average_slip[i] /= rupture_area[i]
     catalog = pd.DataFrame(
-            {
-                "event_time" : event_time,
-                "average_slip" : average_slip,
-                "rupture_area" : rupture_area,
-                "seismic_moment" : seismic_moment,
-                "moment_magnitude" : moment_magnitude(seismic_moment),
-                }
-            )
+        {
+            "event_time": event_time,
+            "average_slip": average_slip,
+            "rupture_area": rupture_area,
+            "seismic_moment": seismic_moment,
+            "moment_magnitude": moment_magnitude(seismic_moment),
+        }
+    )
     return catalog
 
 
