@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import concurrent.futures
+import h5py as h5
 from scipy.optimize import fmin, leastsq
 from okada_wrapper import dc3dwrapper
 from time import time as give_time
@@ -8,36 +9,40 @@ from time import time as give_time
 DELTA_T = 1.0  # time taken before instability to compute the friction
 DECIMAL_PRECISION = 6
 N_POINTS_TIME_SERIES = 2
-dtr = np.float64(np.pi / 180.0)
+DTR = np.float64(np.pi / 180.0)
 rtd = np.float64(180.0 / np.pi)
 
 
 class RateStateFaultPatch(object):
     def __init__(
         self,
-        mu_0,
-        a,
-        b,
-        Dc,
-        d_dot_star,
-        theta_star,
-        sigma_0,
-        d_dot_EQ,
-        beta,
-        lame2,
-        lame1,
-        alpha,
-        L,
-        W,
-        strike_angle,
-        dip_angle,
-        coordinates,
-        right_lateral_faulting,
-        normal_faulting,
+        mu_0=None,
+        a=None,
+        b=None,
+        Dc=None,
+        d_dot_star=None,
+        theta_star=None,
+        sigma_0=None,
+        d_dot_EQ=None,
+        beta=None,
+        lame2=None,
+        lame1=None,
+        alpha=None,
+        L=None,
+        W=None,
+        strike_angle=None,
+        dip_angle=None,
+        x=None,
+        y=None,
+        z=None,
+        right_lateral_faulting=None,
+        normal_faulting=None,
         overshoot=0.9,
         record_history=True,
         tectonic_slip_speed=None,
         tectonic_stressing_rate=None,
+        path=None,
+        gid=None,
     ):
         """
         A class representing a rate-state fault patch simulation.
@@ -76,8 +81,12 @@ class RateStateFaultPatch(object):
             Angle of fault strike in [deg].
         dip_angle : float
             Angle of fault dip in [deg].
-        coordinates : tuple of floats
-            Coordinates of the fault patch in [m].
+        x : float
+            x-coordinate in [m].
+        y : float
+            y-coordinate in [m].
+        z : float
+            z-coordinate in [m].
         right_lateral_faulting : bool
             Flag for right-lateral faulting.
         normal_faulting : bool
@@ -98,53 +107,106 @@ class RateStateFaultPatch(object):
         Use this class to perform simulations and study fault behavior under specified conditions.
 
         """
-        self.a = np.float64(a)
-        self.a_nominal = np.float64(a)
-        self.b = np.float64(b)
-        self.Dc = np.float64(Dc)
-        self.d_dot_star = np.float64(d_dot_star)
-        self.theta_star = np.float64(theta_star)
-        self.mu_0 = np.float64(mu_0)
-        self.mu_0_ = np.float64(mu_0 - a * np.log(d_dot_star) - b * np.log(theta_star))
-        self.sum_term = np.float64(b / Dc)
-        self.alpha = alpha  # normal stress coefficient
+        # ---------------------------------------------
+        #                 Properties
+        # ---------------------------------------------
+        #       store variable names
+        self._property_variables = [
+            "a",
+            "b",
+            "Dc",
+            "d_dot_star",
+            "theta_star",
+            "mu_0",
+            "alpha",
+            "x",
+            "y",
+            "z",
+            "tectonic_slip_speed",
+            "tectonic_stressing_rate",
+            "overshoot",
+            "beta",
+            "lame1",
+            "lame2",
+            "d_dot_EQ",
+            "L",
+            "W",
+            "dip_angle",
+            "strike_angle",
+            "right_lateral_faulting",
+            "normal_faulting"
+        ]
+        if path:
+            # use parameters from file and ignore values given here
+            with h5.File(path, mode="r") as fprop:
+                if gid is not None:
+                    fprop = fprop[gid]
+                for var in self._property_variables:
+                    setattr(self, var, fprop[var][()])
+            self.a_nominal = np.float64(a)
+        else:
+            self.a = np.float64(a)
+            self.a_nominal = np.float64(a)
+            self.b = np.float64(b)
+            self.Dc = np.float64(Dc)
+            self.d_dot_star = np.float64(d_dot_star)
+            self.theta_star = np.float64(theta_star)
+            self.mu_0 = np.float64(mu_0)
+            self.alpha = alpha  # normal stress coefficient
+            self.x = x
+            self.y = y
+            self.z = z
+            if tectonic_slip_speed is None:
+                self.tectonic_slip_speed = 0.0
+            else:
+                self.tectonic_slip_speed = np.float64(tectonic_slip_speed)
+            if tectonic_stressing_rate is None:
+                self.tectonic_stressing_rate = 0.0
+            else:
+                self.tectonic_stressing_rate = np.float64(tectonic_stressing_rate)
+            self.overshoot = np.float64(overshoot)
+            self.beta = np.float64(beta)
+            self.lame2 = np.float64(lame2)
+            self.lame1 = np.float64(lame1)
+            self.d_dot_EQ = np.float64(d_dot_EQ)
+            self.L = np.float64(L)
+            self.W = np.float64(W)
+            self.dip_angle = np.float64(dip_angle)
+            self.strike_angle = np.float64(strike_angle)
+            self.normal_faulting = normal_faulting
+            self.right_lateral_faulting = right_lateral_faulting
+        self.record_history = record_history
+        # ---------------------------------------------
+        #         Set property-based variables
+        # ---------------------------------------------
+        self._set_property_based_variables()
+
+    def _set_property_based_variables(self):
+        self.mu_0_ = np.float64(
+            self.mu_0
+            - self.a * np.log(self.d_dot_star)
+            - self.b * np.log(self.theta_star)
+        )
+        self.sum_term = np.float64(self.b / self.Dc)
         self.xi = self.b - self.a
-        self.x = coordinates[0]
-        self.y = coordinates[1]
-        self.z = coordinates[2]
-        if tectonic_slip_speed is None:
-            self.tectonic_slip_speed = 0.0
-        else:
-            self.tectonic_slip_speed = np.float64(tectonic_slip_speed)
-        if tectonic_stressing_rate is None:
-            self.tectonic_stressing_rate = 0.0
-        else:
-            self.tectonic_stressing_rate = np.float64(tectonic_stressing_rate)
-        self.overshoot = np.float64(overshoot)
-        self.beta = np.float64(beta)
-        self.lame2 = np.float64(lame2)
-        self.lame1 = np.float64(lame1)
-        self.d_dot_EQ = np.float64(d_dot_EQ)
-        self.L = np.float64(L)
-        self.W = np.float64(W)
         self.area = self.L * self.W
-        self.state = int(0)
-        self.displacement = np.float64(0.0)
-        self.dip_angle = np.float64(dip_angle)
-        self.strike_angle = np.float64(strike_angle)
         # -------------------------------------------------
-        # column vector tangent to the fault element, in the direction of positive strike slip
+        # column vector tangent to the fault element and
+        # in the direction of positive strike slip
         self.t_h = np.round(
-            np.array([np.sin(strike_angle * dtr), np.cos(strike_angle * dtr), 0.0]),
+            np.array(
+                [np.sin(self.strike_angle * DTR), np.cos(self.strike_angle * DTR), 0.0]
+            ),
             decimals=DECIMAL_PRECISION,
         )
-        # vector tangent to the fault element, in the direction of positive dip slip (upward)
+        # vector tangent to the fault element and
+        # in the direction of positive dip slip (upward)
         self.t_v = np.round(
             np.array(
                 [
-                    -np.cos(strike_angle * dtr) * np.cos(dip_angle * dtr),
-                    np.sin(strike_angle * dtr) * np.cos(dip_angle * dtr),
-                    np.sin(dip_angle * dtr),
+                    -np.cos(self.strike_angle * DTR) * np.cos(self.dip_angle * DTR),
+                    np.sin(self.strike_angle * DTR) * np.cos(self.dip_angle * DTR),
+                    np.sin(self.dip_angle * DTR),
                 ]
             ),
             decimals=DECIMAL_PRECISION,
@@ -157,14 +219,14 @@ class RateStateFaultPatch(object):
         # define the pitch (i.e. slip vector) for the FOOT WALL (consistent with the normal)
         self.p = np.zeros(3, dtype=np.float64)
         self.p[1] = 0.0  # no displacement parallel to y (north-south)
-        if normal_faulting:
+        if self.normal_faulting:
             # foot wall is slipping upward
-            self.p[2] = +np.sin(dip_angle * dtr) * np.abs(
+            self.p[2] = +np.sin(self.dip_angle * DTR) * np.abs(
                 np.round(np.dot(x_unit, self.t_v), decimals=1)
             )
         else:
             # foot wall is slipping downward
-            self.p[2] = -np.sin(dip_angle * dtr) * np.abs(
+            self.p[2] = -np.sin(self.dip_angle * DTR) * np.abs(
                 np.round(np.dot(x_unit, self.t_v), decimals=1)
             )
         if self.p[2] == 0.0:
@@ -181,28 +243,28 @@ class RateStateFaultPatch(object):
         # Okada: positive dip-slip is reverse faulting, i.e. if HANGING WALL's slip
         # is in the direction of t_v
 
-        # print('Strike angle: {:.2f}, Dip angle: {:.2f}, Strike-slip component = {:.2f}, Dip-slip component = {:.2f}'.format(self.strike_angle, self.dip_angle, self.strike_slip_component, self.dip_slip_component))
         # -------------------------------------------------
-        # change_frame projects vectors from the canonical frame onto the fault
-        # frame
+        # change_frame: canonical frame ---> fault frame
         self.change_frame = np.vstack(
             (self.t_h.reshape(1, -1), self.t_v.reshape(1, -1), self.n.reshape(1, -1))
         )
-        # change_x_y used to rotate the frame around the z axis
+        # change_x_y: rotate the frame around the z axis
         self.change_x_y = np.vstack(
             (
                 self.t_h.reshape(1, -1),
                 np.round(
                     np.array(
-                        [-np.cos(strike_angle * dtr), np.sin(strike_angle * dtr), 0.0]
+                        [
+                            -np.cos(self.strike_angle * DTR),
+                            np.sin(self.strike_angle * DTR),
+                            0.0,
+                        ]
                     ),
                     decimals=DECIMAL_PRECISION,
                 ).reshape(1, -1),
                 z_unit.reshape(1, -1),
             )
         )
-        # -------------------------------------------------
-        self.record_history = record_history
 
     @property
     def shear_modulus(self):
@@ -266,23 +328,67 @@ class RateStateFaultPatch(object):
     def mu_effective(self):
         return self.mu_0 - self.alpha
 
-    def initial_state(self, d_dot_0, theta_0, sigma_0, initial_shear_stress=None):
-        self.d_dot = np.float64(d_dot_0)
-        self.theta = np.float64(theta_0)
-        if initial_shear_stress is None:
-            self.shear_stress = np.float64(0.8 * self.mu_0 * sigma_0)
-        elif isinstance(initial_shear_stress, float):
-            self.shear_stress = np.float64(initial_shear_stress * self.mu_0 * sigma_0)
-        elif initial_shear_stress == "random":
-            self.shear_stress = np.float64(
-                np.random.uniform(0.5, 0.9) * self.mu_0 * sigma_0
+    def initialize_mechanical_state(
+        self,
+        d_dot=None,
+        theta=None,
+        normal_stress=None,
+        state=0,
+        displacement=0.0,
+        friction=0.0,
+        initial_shear_stress=None,
+        path=None,
+        gid=None,
+    ):
+        # ------------------------------------------
+        #       mechanical state variables
+        # ------------------------------------------
+        self._mechanical_state_variables = [
+                "state",
+                "normal_stress",
+                "shear_stress",
+                "displacement",
+                "theta",
+                "friction",
+                "d_dot"
+                ]
+        if path:
+            # use parameters from file and ignore values given here
+            with h5.File(path, mode="r") as fstate:
+                if gid is not None:
+                    fstate = fstate[gid]
+                for var in self._mechanical_state_variables:
+                    setattr(self, var, fstate[var][()])
+        else:
+            self.state = state
+            self.displacement = displacement
+            self.d_dot = np.float64(d_dot)
+            self.theta = np.float64(theta)
+            if initial_shear_stress is None:
+                self.shear_stress = np.float64(0.8 * self.mu_0 * normal_stress)
+            elif isinstance(initial_shear_stress, float):
+                self.shear_stress = np.float64(
+                        initial_shear_stress * self.mu_0 * normal_stress
+                        )
+            elif initial_shear_stress == "random":
+                self.shear_stress = np.float64(
+                    np.random.uniform(0.5, 0.9) * self.mu_0 * nornmal_stress
+                )
+            self.normal_stress = np.float64(normal_stress)
+            self.friction = (
+                friction  # will be initialized to some non-zero value at the end of state 0
             )
-        self.normal_stress = np.float64(sigma_0)
-        self.friction = np.float64(
-            0.0
-        )  # will be initialized to some non-zero value at the end of state 0
+
+    def initialize_history(
+            self,
+            path=None,
+            last=True
+            ):
         # --------------------------------------------------
-        if self.record_history:
+        #                  history
+        # --------------------------------------------------
+        if path is None:
+            # initialize from scratch
             self._state_history = [self.state]
             self._transition_times_history = [0.0]
             self._slip_history = [0.0]
@@ -295,6 +401,34 @@ class RateStateFaultPatch(object):
             self._time = [0.0]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
+            self._history_variables = [
+                "_state_history",
+                "_transition_times_history",
+                "_slip_history",
+                "_slip_speed_history",
+                "_theta_history",
+                "_stress_drop_history",
+                "_event_timings",
+                "_coseismic_displacements",
+                "_coseismic_slip_history",
+                "_time",
+                "_shear_stress_history",
+                "_normal_stress_history",
+            ]
+        else:
+            with h5.File(path, mode="r") as fhist:
+                if last:
+                    for var in fhist:
+                        setattr(self, f"_{var}", fhist[var][-1])
+                else:
+                    for var in fhist:
+                        setattr(self, f"_{var}", fhist[var][()])
+
+
+    def clean_history(self):
+        if self.record_history:
+            for attr in self._history_variables:
+                setattr(self, attr, [getattr(self, attr)[-1]])
 
     def state_0(self, t0_1=None):
         # transition happens when driving stress is above steady state friction
@@ -800,8 +934,6 @@ class RateStateFaultPatch(object):
         )
 
     def set_theta_to_steady_state(self):
-        # self.theta    = self.Dc / self.d_dot
-        # self.theta    = 1./(self.d_dot/self.Dc + self.alpha*self.normal_stress_rate/(self.b*self.normal_stress))
         self.theta = self.adaptive_rounding(
             1.0
             / (
@@ -811,8 +943,6 @@ class RateStateFaultPatch(object):
         )
 
     def set_slip_speed_to_steady_state(self):
-        # self.d_dot    = self.Dc / self.theta
-        # self.d_dot    = self.Dc * (1./self.theta - self.alpha*self.normal_stress_rate/(self.b*self.normal_stress))
         self.d_dot = self.adaptive_rounding(
             self.Dc
             * (
@@ -869,6 +999,36 @@ class RateStateFaultPatch(object):
         n_decimals = max(int(-np.log10(np.abs(X)) + precision), 1)
         return np.round(X, n_decimals)
 
+    # I/O methods
+    def save_properties(self, path, gid=None, overwrite=True):
+        with h5.File(path, mode="a") as fprop:
+            if gid is not None:
+                if overwrite and gid in fprop:
+                    del fprop[gid]
+                    fprop.create_group(gid)
+                fprop = fprop[gid]
+            for var in self._property_variables:
+                if overwrite and var in fprop:
+                    del fprop[var]
+                if var == "a":
+                    fprop.create_dataset(var, data=self.a_nominal)
+                else:
+                    fprop.create_dataset(var, data=getattr(self, var))
+
+    def save_mechanical_state(self, path, gid=None, overwrite=True):
+        with h5.File(path, mode="a") as fstate:
+            if gid is not None:
+                if overwrite and gid in fstate:
+                    del fstate[gid]
+                    fstate.create_group(gid)
+                fstate = fstate[gid]
+            for var in self._mechanical_state_variables:
+                if overwrite and var in fstate:
+                    del fstate[var]
+                if var == "a":
+                    fstate.create_dataset(var, data=self.a_nominal)
+                else:
+                    fstate.create_dataset(var, data=getattr(self, var))
 
 class RateStateFault(object):
     def __init__(
@@ -1053,8 +1213,8 @@ class RateStateFault(object):
                 self.fault_patches[i].tectonic_slip_speed = (
                     self.fault_patches[i].tectonic_stressing_rate
                     / self.fault_patches[i].k
-                    * np.cos(self.fault_patches[i].strike_angle * dtr)
-                    * np.sin(self.fault_patches[i].dip_angle * dtr)
+                    * np.cos(self.fault_patches[i].strike_angle * DTR)
+                    * np.sin(self.fault_patches[i].dip_angle * DTR)
                 )
 
         for i in range(self.n_patches):
@@ -1118,15 +1278,17 @@ class RateStateFault(object):
 
     @property
     def shear_stress(self):
-        return sum(
-                fp.shear_stress * fp.area for fp in self.fault_patches
-                ) / self.fault_area
+        return (
+            sum(fp.shear_stress * fp.area for fp in self.fault_patches)
+            / self.fault_area
+        )
 
     @property
     def normal_stress(self):
-        return sum(
-                fp.normal_stress * fp.area for fp in self.fault_patches
-                ) / self.fault_area
+        return (
+            sum(fp.normal_stress * fp.area for fp in self.fault_patches)
+            / self.fault_area
+        )
 
     def _evolve_one_patch(self, patch_index):
         fp = self.fault_patches[patch_index]
@@ -1414,3 +1576,9 @@ class RateStateFault(object):
         for i in range(self.n_patches):
             stress[i] = self.fault_patches[i].shear_stress
         return stress
+
+    # I/O methods
+
+    def save_properties(self, path):
+        for fp in self.fault_patches:
+            pass
