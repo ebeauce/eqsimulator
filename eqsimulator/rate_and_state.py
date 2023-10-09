@@ -143,7 +143,7 @@ class RateStateFaultPatch(object):
                     fprop = fprop[gid]
                 for var in self._property_variables:
                     setattr(self, var, fprop[var][()])
-            self.a_nominal = np.float64(a)
+            self.a_nominal = np.float64(self.a)
         else:
             self.a = np.float64(a)
             self.a_nominal = np.float64(a)
@@ -278,7 +278,12 @@ class RateStateFaultPatch(object):
 
     @property
     def time(self):
-        return np.asarray(self._time)
+        return np.cumsum(self.start_time + np.asarray(self._time_increments))
+        #return np.asarray(self._time)
+
+    @property
+    def time_increments(self):
+        return np.asarray(self._time_increments)
 
     @property
     def shear_stress_history(self):
@@ -337,6 +342,7 @@ class RateStateFaultPatch(object):
         displacement=0.0,
         friction=0.0,
         initial_shear_stress=None,
+        start_time=0.,
         path=None,
         gid=None,
     ):
@@ -350,7 +356,10 @@ class RateStateFaultPatch(object):
                 "displacement",
                 "theta",
                 "friction",
-                "d_dot"
+                "d_dot",
+                "shear_stress_rate",
+                "normal_stress_rate",
+                "start_time",
                 ]
         if path:
             # use parameters from file and ignore values given here
@@ -359,6 +368,7 @@ class RateStateFaultPatch(object):
                     fstate = fstate[gid]
                 for var in self._mechanical_state_variables:
                     setattr(self, var, fstate[var][()])
+                    print(var, getattr(self, var))
         else:
             self.state = state
             self.displacement = displacement
@@ -378,6 +388,9 @@ class RateStateFaultPatch(object):
             self.friction = (
                 friction  # will be initialized to some non-zero value at the end of state 0
             )
+            self.shear_stress_rate = None
+            self.normal_stress_rate = None
+            self.start_time = 0.
 
     def initialize_history(
             self,
@@ -398,7 +411,8 @@ class RateStateFaultPatch(object):
             self._event_timings = [0.0]
             self._coseismic_displacements = [0.0]
             self._coseismic_slip_history = [0.0]
-            self._time = [0.0]
+            self._time_increments = [0.0]
+            #self._time = [0.0]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
             self._history_variables = [
@@ -411,7 +425,8 @@ class RateStateFaultPatch(object):
                 "_event_timings",
                 "_coseismic_displacements",
                 "_coseismic_slip_history",
-                "_time",
+                "_time_increments",
+                #"_time",
                 "_shear_stress_history",
                 "_normal_stress_history",
             ]
@@ -457,7 +472,7 @@ class RateStateFaultPatch(object):
         if self.record_history:
             # -------- UPDATE HISTORY ----------
             self.update_history(t1_2)
-            self._event_timings.append(self._time[-1])
+            self._event_timings.append(self.time[-1])
             # ----------------------------------
         self.shear_stress += self.shear_stress_rate * t1_2
         self.normal_stress += self.normal_stress_rate * t1_2
@@ -516,11 +531,12 @@ class RateStateFaultPatch(object):
 
     def update_history(self, duration):
         total_time = np.linspace(
-            self._time[-1], self._time[-1] + duration, N_POINTS_TIME_SERIES
+            self.time[-1], self.time[-1] + duration, N_POINTS_TIME_SERIES
         )
         delta_time = total_time - total_time[0]
         displacement = delta_time * self.d_dot
-        self._time.extend(total_time.tolist())
+        #self._time.extend(total_time.tolist())
+        self._time_increments.extend(delta_time.tolist())
         self._shear_stress_history.extend(
             list(self._shear_stress_history[-1] + self.shear_stress_rate * delta_time)
         )
@@ -1004,6 +1020,40 @@ class RateStateFaultPatch(object):
         return np.round(X, n_decimals)
 
     # I/O methods
+    def save_history(self, path, var=None, gid=None, overwrite=False):
+        with h5.File(path, mode="a") as fhist:
+            if gid is not None:
+                if gid not in fhist:
+                    fhist.create_group(gid)
+                fhist = fhist[gid]
+            if var is None:
+                var_pool = self._history_variables
+            else:
+                var_pool = var
+            for var in var_pool:
+                # ignore the trailing character
+                var = var[1:]
+                if overwrite and var in fhist:
+                    del fhist[var]
+                time_series = getattr(self, var)
+                if var not in fhist:
+                    # initialize data set
+                    fhist.create_dataset(
+                            var,
+                            data=time_series,
+                            compression="gzip",
+                            chunks=True,
+                            maxshape=(None,)
+                            )
+                else:
+                    # append to existing data set
+                    fhist[var].resize(
+                            fhist[var].shape[0] + len(time_series),
+                            axis=0
+                            )
+                    fhist[var][-len(time_series):] = time_series
+
+
     def save_properties(self, path, gid=None, overwrite=True):
         with h5.File(path, mode="a") as fprop:
             if gid is not None:
@@ -1165,106 +1215,88 @@ class RateStateFault(object):
                 # ------------------------------------------------------------------------------------------------------------------
         # self.Kij_shear = (self.Kij_shear + self.Kij_shear.T)/2.
         self.tectonic_slip_speeds = tectonic_slip_speeds
-        for i in range(self.n_patches):
-            self.fault_patches[i].ktau_tectonic = np.float64(
+        for i, fp in enumerate(self.fault_patches):
+            fp.ktau_tectonic = np.float64(
                 -1.0
                 * (
                     np.sum(self.Kij_shear[i, :] * tectonic_slip_speeds)
-                    / self.fault_patches[i].tectonic_slip_speed
+                    / fp.tectonic_slip_speed
                 )
             )
             if ktau_tectonic is not None:
-                self.fault_patches[i].ktau_tectonic = ktau_tectonic
-            self.fault_patches[i].ksigma_tectonic = np.float64(
+                fp.ktau_tectonic = ktau_tectonic
+            fp.ksigma_tectonic = np.float64(
                 -1.0
                 * (
                     np.sum(self.Kij_normal[i, :] * tectonic_slip_speeds)
-                    / self.fault_patches[i].tectonic_slip_speed
+                    / fp.tectonic_slip_speed
                 )
             )
-            self.fault_patches[i].k = np.float64(abs(self.Kij_shear[i, i]))
-            self.fault_patches[i].update_H()
-            if self.fault_patches[i].tectonic_stressing_rate == 0.0:
+            fp.k = np.float64(abs(self.Kij_shear[i, i]))
+            fp.update_H()
+            if fp.shear_stress_rate is None:
                 # tectonic slip speed is imposed
-                self.fault_patches[i].shear_stress_rate = (
-                    self.fault_patches[i].tectonic_slip_speed
-                    * self.fault_patches[i].ktau_tectonic
-                )
-                self.fault_patches[i].normal_stress_rate = (
-                    self.fault_patches[i].tectonic_slip_speed
-                    * self.fault_patches[i].ksigma_tectonic
+                fp.shear_stress_rate = (
+                    fp.tectonic_slip_speed
+                    * fp.ktau_tectonic
                 )
                 print(
-                    "Tectonic stressing rates: shear rate = {:.2e}MPa/yr, normal rate = {:.2e}MPa/yr".format(
-                        self.fault_patches[i].shear_stress_rate
-                        * 3600.0
-                        * 365.0
-                        * 24.0
-                        / 1.0e6,
-                        self.fault_patches[i].normal_stress_rate
+                    "Tectonic shear stress rate = {:.2e}MPa/yr".format(
+                        fp.shear_stress_rate
                         * 3600.0
                         * 365.0
                         * 24.0
                         / 1.0e6,
                     )
                 )
-            else:
-                # tectonic stress rate is imposed
-                self.fault_patches[i].shear_stress_rate = (
-                    self.fault_patches[i].tectonic_stressing_rate
-                    * self.fault_patches[i].p[0]
+            if fp.normal_stress_rate is None:
+                # tectonic slip speed is imposed
+                fp.normal_stress_rate = (
+                    fp.tectonic_slip_speed
+                    * fp.ksigma_tectonic
                 )
-                self.fault_patches[i].tectonic_slip_speed = (
-                    self.fault_patches[i].tectonic_stressing_rate
-                    / self.fault_patches[i].k
-                    * np.cos(self.fault_patches[i].strike_angle * DTR)
-                    * np.sin(self.fault_patches[i].dip_angle * DTR)
+                print(
+                    "Tectonic normal stress rate = {:.2e}MPa/yr".format(
+                        fp.normal_stress_rate
+                        * 3600.0
+                        * 365.0
+                        * 24.0
+                        / 1.0e6,
+                    )
                 )
 
-        for i in range(self.n_patches):
-            if self.fault_patches[i].k > self.fault_patches[i].critical_stiffness():
+        for i, fp in enumerate(self.fault_patches):
+            if fp.state == 3:
+                # fault patch was initialized from previous simulation
+                continue
+            elif fp.k > fp.critical_stiffness():
                 # stable patch (creeping)
-                self.fault_patches[i].stable = True
-                self.fault_patches[i].state = 3
-                self.fault_patches[i].d_dot = self.fault_patches[i].tectonic_slip_speed
+                fp.stable = True
+                fp.state = 3
+                fp.d_dot = fp.tectonic_slip_speed
                 # ! set ktau_tectonic to 0 !
                 # when
-                self.fault_patches[i].set_theta_to_steady_state()
-                self.fault_patches[i].set_friction_to_steady_state()
-                self.fault_patches[i].shear_stress = self.fault_patches[
+                fp.set_theta_to_steady_state()
+                fp.set_friction_to_steady_state()
+                fp.shear_stress = self.fault_patches[
                     i
                 ].friction  # stable steady state
-                self.fault_patches[i].shear_stress_history[0] = self.fault_patches[
+                fp.shear_stress_history[0] = self.fault_patches[
                     i
                 ].shear_stress
-                # extra_stressing = 0.
-                for j in range(self.n_patches):
-                    # steady motion on patch i redistributes stress:
-                    self.fault_patches[j].shear_stress_rate += (
-                        self.fault_patches[i].tectonic_slip_speed * self.Kij_shear[i, j]
-                    )
-                    # extra_stressing += self.fault_patches[i].tectonic_slip_speed * self.Kij_shear[i, j]
-                    self.fault_patches[j].normal_stress_rate += (
-                        self.fault_patches[i].tectonic_slip_speed
-                        * self.Kij_normal[i, j]
-                    )
-                print("Patch {:d} is stable.".format(i))
-                # print(
-                #    "Shear stressing rate = {:.2f}".format(
-                #        self.fault_patches[i].shear_stress_rate
-                #    )
-                # )
-                # print(f"Extra stressing: {extra_stressing}")
-                self.fault_patches[i].d_dot_0 = np.float64(self.fault_patches[i].d_dot)
+                print(f"Patch {i} is stable.")
+                fp.d_dot_0 = np.float64(fp.d_dot)
             else:
                 # unstable patch
-                self.fault_patches[i].stable = False
-                self.fault_patches[i].d_dot_0 = np.float64(self.fault_patches[i].d_dot)
+                fp.stable = False
+                fp.d_dot_0 = np.float64(fp.d_dot)
+        # update stressing rates to account for creeping patches
+        self.update_stressing_rates()
         # ---------------------------------
         self.fault_area = sum([fp.area for fp in self.fault_patches])
         # self.time_jumps = np.zeros(0, dtype=np.float64)
         if self.record_history:
-            self._time = [0.0]
+            self._time = [self.fault_patches[0].time[0]]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
 
@@ -1402,7 +1434,7 @@ class RateStateFault(object):
         #            decimals=DECIMAL_PRECISION
         #        )
         if self.record_history:
-            self._time.append(times[0] + self._time[-1])
+            self._time.append(times[0] + self.time[-1])
             self._shear_stress_history.append(self.shear_stress)
             self._normal_stress_history.append(self.normal_stress)
 
@@ -1416,7 +1448,7 @@ class RateStateFault(object):
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(1)
                     self.fault_patches[i]._transition_times_history.append(
-                        self.fault_patches[i]._time[-1]
+                        self.fault_patches[i].time[-1]
                     )
                 continue
             self.fault_patches[i].evolve_current_state(t0_1, self, i)
@@ -1445,7 +1477,7 @@ class RateStateFault(object):
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(3)
                     self.fault_patches[i]._transition_times_history.append(
-                        self.fault_patches[i]._time[-1]
+                        self.fault_patches[i].time[-1]
                     )
                 continue
             self.fault_patches[i].evolve_current_state(t0_3, self, i)
@@ -1469,7 +1501,7 @@ class RateStateFault(object):
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(2)
                     self.fault_patches[i]._transition_times_history.append(
-                        self.fault_patches[i]._time[-1]
+                        self.fault_patches[i].time[-1]
                     )
                 continue
             self.fault_patches[i].evolve_current_state(t1_2, self, i)
@@ -1500,7 +1532,7 @@ class RateStateFault(object):
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(3)
                     self.fault_patches[i]._transition_times_history.append(
-                        self.fault_patches[i]._time[-1]
+                        self.fault_patches[i].time[-1]
                     )
                 continue
             self.fault_patches[i].evolve_current_state(t1_3, self, i)
@@ -1528,7 +1560,7 @@ class RateStateFault(object):
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(0)
                     self.fault_patches[i]._transition_times_history.append(
-                        self.fault_patches[i]._time[-1]
+                        self.fault_patches[i].time[-1]
                     )
                 continue
             self.fault_patches[i].evolve_current_state(t2_0, self, i)
@@ -1545,7 +1577,7 @@ class RateStateFault(object):
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(1)
                     self.fault_patches[i]._transition_times_history.append(
-                        self.fault_patches[i]._time[-1]
+                        self.fault_patches[i].time[-1]
                     )
                 continue
             self.fault_patches[i].evolve_current_state(t3_1, self, i)
