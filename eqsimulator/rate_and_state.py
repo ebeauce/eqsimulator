@@ -43,6 +43,7 @@ class RateStateFaultPatch(object):
         tectonic_stressing_rate=None,
         path=None,
         gid=None,
+        fault_patch_id=None
     ):
         """
         A class representing a rate-state fault patch simulation.
@@ -122,6 +123,7 @@ class RateStateFaultPatch(object):
             "x",
             "y",
             "z",
+            "fault_patch_id",
             "tectonic_slip_speed",
             "tectonic_stressing_rate",
             "overshoot",
@@ -156,6 +158,7 @@ class RateStateFaultPatch(object):
             self.x = x
             self.y = y
             self.z = z
+            self.fault_patch_id = None
             if tectonic_slip_speed is None:
                 self.tectonic_slip_speed = 0.0
             else:
@@ -278,7 +281,7 @@ class RateStateFaultPatch(object):
 
     @property
     def time(self):
-        return np.cumsum(self.start_time + np.asarray(self._time_increments))
+        return self.start_time + np.cumsum(np.asarray(self._time_increments))
         #return np.asarray(self._time)
 
     @property
@@ -341,6 +344,7 @@ class RateStateFaultPatch(object):
         state=0,
         displacement=0.0,
         friction=0.0,
+        a=None,
         initial_shear_stress=None,
         start_time=0.,
         path=None,
@@ -356,6 +360,7 @@ class RateStateFaultPatch(object):
                 "displacement",
                 "theta",
                 "friction",
+                "a",
                 "d_dot",
                 "shear_stress_rate",
                 "normal_stress_rate",
@@ -371,6 +376,7 @@ class RateStateFaultPatch(object):
                     print(var, getattr(self, var))
         else:
             self.state = state
+            self.a = self.a_nominal
             self.displacement = displacement
             self.d_dot = np.float64(d_dot)
             self.theta = np.float64(theta)
@@ -395,11 +401,26 @@ class RateStateFaultPatch(object):
     def initialize_history(
             self,
             path=None,
-            last=True
+            #last=True
             ):
         # --------------------------------------------------
         #                  history
         # --------------------------------------------------
+        self._history_variables = [
+            "_state_history",
+            "_transition_times_history",
+            "_slip_history",
+            "_slip_speed_history",
+            "_theta_history",
+            "_stress_drop_history",
+            "_event_timings",
+            "_coseismic_displacements",
+            "_coseismic_slip_history",
+            "_time_increments",
+            #"_time",
+            "_shear_stress_history",
+            "_normal_stress_history",
+        ]
         if path is None:
             # initialize from scratch
             self._state_history = [self.state]
@@ -415,33 +436,24 @@ class RateStateFaultPatch(object):
             #self._time = [0.0]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
-            self._history_variables = [
-                "_state_history",
-                "_transition_times_history",
-                "_slip_history",
-                "_slip_speed_history",
-                "_theta_history",
-                "_stress_drop_history",
-                "_event_timings",
-                "_coseismic_displacements",
-                "_coseismic_slip_history",
-                "_time_increments",
-                #"_time",
-                "_shear_stress_history",
-                "_normal_stress_history",
-            ]
         else:
             with h5.File(path, mode="r") as fhist:
-                if last:
-                    for var in fhist:
-                        setattr(self, f"_{var}", fhist[var][-1])
-                else:
-                    for var in fhist:
-                        setattr(self, f"_{var}", fhist[var][()])
+                for var in fhist:
+                    setattr(self, f"_{var}", [fhist[var][-1]])
+                self._time_increments[-1] = 0.
+
+                #if last:
+                #    for var in fhist:
+                #        setattr(self, f"_{var}", [fhist[var][-1]])
+                #    self._time_increments[-1] = 0.
+                #else:
+                #    for var in fhist:
+                #        setattr(self, f"_{var}", fhist[var][()].tolist())
 
 
     def clean_history(self):
         if self.record_history:
+            self.start_time = self.time[-1]
             for attr in self._history_variables:
                 setattr(self, attr, [getattr(self, attr)[-1]])
 
@@ -1059,6 +1071,7 @@ class RateStateFaultPatch(object):
             if gid is not None:
                 if overwrite and gid in fprop:
                     del fprop[gid]
+                if gid not in fprop:
                     fprop.create_group(gid)
                 fprop = fprop[gid]
             for var in self._property_variables:
@@ -1074,6 +1087,7 @@ class RateStateFaultPatch(object):
             if gid is not None:
                 if overwrite and gid in fstate:
                     del fstate[gid]
+                if gid not in fstate:
                     fstate.create_group(gid)
                 fstate = fstate[gid]
             for var in self._mechanical_state_variables:
@@ -1081,44 +1095,104 @@ class RateStateFaultPatch(object):
                     del fstate[var]
                 if var == "a":
                     fstate.create_dataset(var, data=self.a_nominal)
+                elif var == "start_time":
+                    fstate.create_dataset(var, data=self.time[-1])
                 else:
                     fstate.create_dataset(var, data=getattr(self, var))
 
 class RateStateFault(object):
     def __init__(
         self,
-        coords_fault_patches,
-        fault_patches,
+        fault_patches=None,
         neighboring_patches=None,
-        ktau_tectonic=None,
         a_reduction_factor=0.1,
         V_V0_ratio_for_update=1.25,
         record_history=True,
         verbose=True,
+        path=None,
     ):
+        if path is None and fault_patches is None:
+            print("You need to specify fault_patches or path!")
+            return
+        if path is None:
+            self.fault_patches = fault_patches
+        else:
+            with h5.File(path, mode="r") as fprop:
+                gids = list(fprop.keys())
+                print(gids)
+            self.fault_patches = [
+                    RateStateFaultPatch(
+                        path=path,
+                        gid=gids[i],
+                        record_history=record_history
+                        )
+                    for i in range(len(gids))
+                    ]
+        for i, fp in enumerate(self.fault_patches):
+            if fp.fault_patch_id is None:
+                fp.fault_patch_id = i
+            # ----------------------------------------------------------------
+            if neighboring_patches is not None:
+                fp.neighbors = neighboring_patches[i]
+            else:
+                fp.neighbors = []
         self.verbose = verbose
-        self.n_patches = coords_fault_patches.shape[0]
-        self.fault_patches = fault_patches
-        self.coords = coords_fault_patches
+        self.n_patches = len(self.fault_patches)
+        self.coords = np.asarray(
+                [[fp.x, fp.y, fp.z] for fp in self.fault_patches]
+                )
         self.a_reduction_factor = a_reduction_factor
         self.V_V0_ratio_for_update = V_V0_ratio_for_update
+        self.fault_area = sum([fp.area for fp in self.fault_patches])
+        self.locked_patches = np.zeros(self.n_patches, dtype=bool)
         self.record_history = record_history
+
+    @property
+    def time(self):
+        return self.start_time + np.cumsum(np.asarray(self._time_increments))
+
+    @property
+    def time_increments(self):
+        return np.asarray(self._time_increments)
+
+    @property
+    def shear_stress_history(self):
+        return np.asarray(self._shear_stress_history)
+
+    @property
+    def normal_stress_history(self):
+        return np.asarray(self._normal_stress_history)
+
+    @property
+    def shear_stress(self):
+        return (
+            sum(fp.shear_stress * fp.area for fp in self.fault_patches)
+            / self.fault_area
+        )
+
+    @property
+    def normal_stress(self):
+        return (
+            sum(fp.normal_stress * fp.area for fp in self.fault_patches)
+            / self.fault_area
+        )
+
+    def initialize_mechanical_state(self, path=None):
+        if path is not None:
+            for fp in self.fault_patches:
+                fp.initialize_mechanical_state(
+                        path=path, gid=str(fp.fault_patch_id)
+                        )
+        #if path is None:
         self.Kij_shear = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         self.Kij_normal = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         tectonic_slip_speeds = np.zeros(self.n_patches, dtype=np.float64)
-        for i in range(self.n_patches):
-            self.fault_patches[i].fault_patch_id = i
-            # ----------------------------------------------------------------
-            if neighboring_patches is not None:
-                self.fault_patches[i].neighbors = neighboring_patches[i]
-            else:
-                self.fault_patches[i].neighbors = []
-            tectonic_slip_speeds[i] = self.fault_patches[i].tectonic_slip_speed
+        for i, fp in enumerate(self.fault_patches):
+            tectonic_slip_speeds[i] = fp.tectonic_slip_speed
             # ----------------------------------------------------------------
             #      attach a link to the parent fault object to each fault patch
-            self.fault_patches[i].parent = self
-            normal_bloc = np.array(fault_patches[i].n)
-            normal_bloc = normal_bloc.reshape(-1, 1)
+            fp.parent = self
+            normal_bloc = np.asarray(fp.n).reshape(-1, 1)
             # if normal_bloc[2] == 0.:
             #    # vertical fault: make sure the normal points southward
             #    if normal_bloc[1] > 0.:
@@ -1131,47 +1205,44 @@ class RateStateFault(object):
             # coseismic motion is expected to occur in the direction of tectonic loading,
             # i.e. the x direction
             # ================================================================
-            alpha_i = (fault_patches[i].lame1 + fault_patches[i].lame2) / (
-                fault_patches[i].lame1 + 2.0 * fault_patches[i].lame2
-            )
-            for j in range(self.n_patches):
-                x = coords_fault_patches[i, 0] - coords_fault_patches[j, 0]
-                y = coords_fault_patches[i, 1] - coords_fault_patches[j, 1]
-                z = coords_fault_patches[i, 2]
+            alpha_i = (fp.lame1 + fp.lame2) / (fp.lame1 + 2.0 * fp.lame2)
+            for j, fp_j in enumerate(self.fault_patches):
+                x = fp.x - fp_j.x
+                y = fp.y - fp_j.y
+                z = fp.z
                 P = np.float64([x, y, z])
-                P2 = np.dot(fault_patches[j].change_x_y, P.reshape(-1, 1)).flatten()
+                P2 = np.dot(fp_j.change_x_y, P.reshape(-1, 1)).flatten()
                 # displacement on fault patch i due to left-lateral slip on fault patch j
                 #             strike slip component
                 # positive strike slip = left-lateral
                 success, U, grad_U = dc3dwrapper(
                     alpha_i,
                     P2,
-                    abs(coords_fault_patches[j, 2]),
-                    fault_patches[j].dip_angle,
-                    [-fault_patches[j].L / 2, +fault_patches[j].L / 2],
-                    [-fault_patches[j].W / 2, +fault_patches[j].W / 2],
-                    [fault_patches[j].strike_slip_component, 0.0, 0.0],
+                    abs(fp_j.z),
+                    fp_j.dip_angle,
+                    [-fp_j.L / 2, +fp_j.L / 2],
+                    [-fp_j.W / 2, +fp_j.W / 2],
+                    [fp_j.strike_slip_component, 0.0, 0.0],
                 )
                 # success, U, grad_U = dc3dwrapper(1., [0., 0., -abs(coords_fault_patches[j,2])], abs(coords_fault_patches[j,2]), \
-                #                                 fault_patches[j].dip_angle, [-fault_patches[j].L/2, +fault_patches[j].L/2], [-fault_patches[j].W/2, +fault_patches[j].W/2], \
+                #                                 fp_j.dip_angle, [-fp_j.L/2, +fp_j.L/2], [-fp_j.W/2, +fp_j.W/2], \
                 #                                 [-1., 0., 0.])
-                stress_tensor_fault_j_frame = fault_patches[i].lame2 * (
+                stress_tensor_fault_j_frame = fp.lame2 * (
                     grad_U + grad_U.T
-                ) + fault_patches[i].lame1 * np.identity(3) * np.trace(grad_U)
+                ) + fp.lame1 * np.identity(3) * np.trace(grad_U)
                 traction = np.dot(stress_tensor_fault_j_frame, normal_bloc).flatten()
                 stress_tensor_canonical_frame = np.dot(
-                    np.dot(fault_patches[j].change_x_y.T, stress_tensor_fault_j_frame),
-                    fault_patches[j].change_x_y,
+                    np.dot(fp_j.change_x_y.T, stress_tensor_fault_j_frame),
+                    fp_j.change_x_y,
                 )
                 traction = np.dot(stress_tensor_canonical_frame, normal_bloc).flatten()
-                # traction = np.dot(fault_patches[j].change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fault_patches[j].change_x_y, normal_bloc))).flatten()
+                # traction = np.dot(fp_j.change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fp_j.change_x_y, normal_bloc))).flatten()
                 if success != 0:
                     print(
-                        "Displacement field calculation failed for interactions between patch {:d} and patch {:d} !".format(
-                            i, j
+                        "Displacement field calculation failed for interactions "
+                        f"between patch {i} and patch {j}!"
                         )
-                    )
-                self.Kij_shear[i, j] = np.dot(traction, -fault_patches[i].p)
+                self.Kij_shear[i, j] = np.dot(traction, -fp.p)
                 # the normal is defined going outward of the fault plane, but normal stress is counted positive for compressional stresses, hence x-1
                 self.Kij_normal[i, j] += np.dot(traction, normal_bloc) * -1.0
                 # displacement on fault patch i due to reverse faulting on fault patch j
@@ -1180,40 +1251,39 @@ class RateStateFault(object):
                 success, U, grad_U = dc3dwrapper(
                     alpha_i,
                     P2,
-                    abs(coords_fault_patches[j, 2]),
-                    fault_patches[j].dip_angle,
-                    [-fault_patches[j].L / 2, +fault_patches[j].L / 2],
-                    [-fault_patches[j].W / 2, +fault_patches[j].W / 2],
-                    [0.0, fault_patches[j].dip_slip_component, 0.0],
+                    abs(fp_j.z),
+                    fp_j.dip_angle,
+                    [-fp_j.L / 2, +fp_j.L / 2],
+                    [-fp_j.W / 2, +fp_j.W / 2],
+                    [0.0, fp_j.dip_slip_component, 0.0],
                 )
-                stress_tensor_fault_j_frame = fault_patches[i].lame2 * (
+                stress_tensor_fault_j_frame = fp.lame2 * (
                     grad_U + grad_U.T
-                ) + fault_patches[i].lame1 * np.identity(3) * np.trace(grad_U)
+                ) + fp.lame1 * np.identity(3) * np.trace(grad_U)
                 stress_tensor_canonical_frame = np.dot(
-                    np.dot(fault_patches[j].change_x_y.T, stress_tensor_fault_j_frame),
-                    fault_patches[j].change_x_y,
+                    np.dot(fp_j.change_x_y.T, stress_tensor_fault_j_frame),
+                    fp_j.change_x_y,
                 )
                 traction = np.dot(stress_tensor_canonical_frame, normal_bloc).flatten()
-                # traction = np.dot(fault_patches[j].change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fault_patches[j].change_x_y, normal_bloc))).flatten()
+                # traction = np.dot(fp_j.change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fp_j.change_x_y, normal_bloc))).flatten()
                 # if j == i:
                 #    print '-------------------'
                 #    print normal_bloc
-                #    print np.dot(fault_patches[j].change_x_y, normal_bloc)
-                #    print np.dot(stress_tensor_fault_j_frame, np.dot(fault_patches[j].change_x_y, normal_bloc))
-                #    print np.dot(fault_patches[j].change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fault_patches[j].change_x_y, normal_bloc)))
-                #    print np.dot(np.dot(fault_patches[j].change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fault_patches[j].change_x_y, normal_bloc))).T, normal_bloc)
+                #    print np.dot(fp_j.change_x_y, normal_bloc)
+                #    print np.dot(stress_tensor_fault_j_frame, np.dot(fp_j.change_x_y, normal_bloc))
+                #    print np.dot(fp_j.change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fp_j.change_x_y, normal_bloc)))
+                #    print np.dot(np.dot(fp_j.change_x_y.T, np.dot(stress_tensor_fault_j_frame, np.dot(fp_j.change_x_y, normal_bloc))).T, normal_bloc)
                 if success != 0:
                     print(
                         "Displacement field calculation failed for interactions between patch {:d} and patch {:d} !".format(
                             i, j
                         )
                     )
-                self.Kij_shear[i, j] += np.dot(traction, -fault_patches[i].p)
+                self.Kij_shear[i, j] += np.dot(traction, -fp.p)
                 # the normal is defined going outward of the fault plane,
                 # but normal stress is counted positive for compressional stresses, hence x-1
                 self.Kij_normal[i, j] += np.dot(traction, normal_bloc) * -1.0
-                # ------------------------------------------------------------------------------------------------------------------
-        # self.Kij_shear = (self.Kij_shear + self.Kij_shear.T)/2.
+                # -----------------------------------------------------------
         self.tectonic_slip_speeds = tectonic_slip_speeds
         for i, fp in enumerate(self.fault_patches):
             fp.ktau_tectonic = np.float64(
@@ -1223,8 +1293,6 @@ class RateStateFault(object):
                     / fp.tectonic_slip_speed
                 )
             )
-            if ktau_tectonic is not None:
-                fp.ktau_tectonic = ktau_tectonic
             fp.ksigma_tectonic = np.float64(
                 -1.0
                 * (
@@ -1234,37 +1302,9 @@ class RateStateFault(object):
             )
             fp.k = np.float64(abs(self.Kij_shear[i, i]))
             fp.update_H()
-            if fp.shear_stress_rate is None:
-                # tectonic slip speed is imposed
-                fp.shear_stress_rate = (
-                    fp.tectonic_slip_speed
-                    * fp.ktau_tectonic
-                )
-                print(
-                    "Tectonic shear stress rate = {:.2e}MPa/yr".format(
-                        fp.shear_stress_rate
-                        * 3600.0
-                        * 365.0
-                        * 24.0
-                        / 1.0e6,
-                    )
-                )
-            if fp.normal_stress_rate is None:
-                # tectonic slip speed is imposed
-                fp.normal_stress_rate = (
-                    fp.tectonic_slip_speed
-                    * fp.ksigma_tectonic
-                )
-                print(
-                    "Tectonic normal stress rate = {:.2e}MPa/yr".format(
-                        fp.normal_stress_rate
-                        * 3600.0
-                        * 365.0
-                        * 24.0
-                        / 1.0e6,
-                    )
-                )
 
+        # initialize stressing rates
+        self.update_stressing_rates()
         for i, fp in enumerate(self.fault_patches):
             if fp.state == 3:
                 # fault patch was initialized from previous simulation
@@ -1292,39 +1332,19 @@ class RateStateFault(object):
                 fp.d_dot_0 = np.float64(fp.d_dot)
         # update stressing rates to account for creeping patches
         self.update_stressing_rates()
-        # ---------------------------------
-        self.fault_area = sum([fp.area for fp in self.fault_patches])
-        # self.time_jumps = np.zeros(0, dtype=np.float64)
+        self.start_time = self.fault_patches[0].start_time
         if self.record_history:
-            self._time = [self.fault_patches[0].time[0]]
+            for fp in self.fault_patches:
+                fp.initialize_history()
+            self._time_increments = [0.]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
+            self._history_variables = [
+                    "_time_increments",
+                    "_shear_stress_history",
+                    "_normal_stress_history",
+                    ]
 
-    @property
-    def time(self):
-        return np.asarray(self._time)
-
-    @property
-    def shear_stress_history(self):
-        return np.asarray(self._shear_stress_history)
-
-    @property
-    def normal_stress_history(self):
-        return np.asarray(self._normal_stress_history)
-
-    @property
-    def shear_stress(self):
-        return (
-            sum(fp.shear_stress * fp.area for fp in self.fault_patches)
-            / self.fault_area
-        )
-
-    @property
-    def normal_stress(self):
-        return (
-            sum(fp.normal_stress * fp.area for fp in self.fault_patches)
-            / self.fault_area
-        )
 
     def _evolve_one_patch(self, patch_index):
         fp = self.fault_patches[patch_index]
@@ -1434,7 +1454,8 @@ class RateStateFault(object):
         #            decimals=DECIMAL_PRECISION
         #        )
         if self.record_history:
-            self._time.append(times[0] + self.time[-1])
+            #self._time.append(times[0] + self.time[-1])
+            self._time_increments.append(times[0])
             self._shear_stress_history.append(self.shear_stress)
             self._normal_stress_history.append(self.normal_stress)
 
@@ -1614,7 +1635,57 @@ class RateStateFault(object):
         return stress
 
     # I/O methods
-
-    def save_properties(self, path):
+    def save_properties(self, path, overwrite=True):
         for fp in self.fault_patches:
-            pass
+            fp.save_properties(path, gid=str(fp.fault_patch_id), overwrite=overwrite)
+
+    def save_mechanical_state(self, path, overwrite=True):
+        for fp in self.fault_patches:
+            fp.save_mechanical_state(
+                    path, gid=str(fp.fault_patch_id), overwrite=overwrite
+                    )
+
+    def save_history(self, path, var=None, var_fault=None, overwrite=False):
+        for fp in self.fault_patches:
+            fp.save_history(
+                    path, gid=str(fp.fault_patch_id), var=var, overwrite=overwrite
+                    )
+        if var_fault is None:
+            var_fault_pool = self._history_variables
+        else:
+            var_fault_pool = var_fault
+        with h5.File(path, mode="a") as ffault:
+            if "fault" not in ffault:
+                ffault.create_group("fault")
+            ffault = ffault["fault"]
+            for var_fault in var_fault_pool:
+                # ignore the trailing character
+                var_fault = var_fault[1:]
+                if overwrite and var_fault in ffault:
+                    del ffault[var_fault]
+                time_series = getattr(self, var_fault)
+                if var_fault not in ffault:
+                    # initialize data set
+                    ffault.create_dataset(
+                            var_fault,
+                            data=time_series,
+                            compression="gzip",
+                            chunks=True,
+                            maxshape=(None,),
+                            )
+                else:
+                    # append to existing data set
+                    ffault[var_fault].resize(
+                            ffault[var_fault].shape[0] + len(time_series),
+                            axis=0
+                            )
+                    ffault[var_fault][-len(time_series):] = time_series
+
+    def clean_history(self):
+        if self.record_history:
+            for fp in self.fault_patches:
+                fp.clean_history()
+            self.start_time = self.time[-1]
+            for attr in self._history_variables:
+                setattr(self, attr, [getattr(self, attr)[-1]])
+
