@@ -358,6 +358,7 @@ class RateStateFaultPatch(object):
                 "normal_stress",
                 "shear_stress",
                 "displacement",
+                "shear_stress_0",
                 "theta",
                 "friction",
                 "a",
@@ -390,6 +391,7 @@ class RateStateFaultPatch(object):
                 self.shear_stress = np.float64(
                     np.random.uniform(0.5, 0.9) * self.mu_0 * nornmal_stress
                 )
+            self.shear_stress_0 = float(self.shear_stress)
             self.normal_stress = np.float64(normal_stress)
             self.friction = (
                 friction  # will be initialized to some non-zero value at the end of state 0
@@ -401,7 +403,8 @@ class RateStateFaultPatch(object):
     def initialize_history(
             self,
             path=None,
-            #last=True
+            readall=False,
+            gid=None,
             ):
         # --------------------------------------------------
         #                  history
@@ -423,14 +426,16 @@ class RateStateFaultPatch(object):
         ]
         if path is None:
             # initialize from scratch
+            # -------- essential history variables -----
+            self._event_timings = [0.0]
+            self._stress_drop_history = [0.0]
+            self._coseismic_displacements = [0.0]
+            # -------- optional history variables -------
             self._state_history = [self.state]
             self._transition_times_history = [0.0]
             self._slip_history = [0.0]
             self._slip_speed_history = [self.d_dot]
             self._theta_history = [self.theta]
-            self._stress_drop_history = [0.0]
-            self._event_timings = [0.0]
-            self._coseismic_displacements = [0.0]
             self._coseismic_slip_history = [0.0]
             self._time_increments = [0.0]
             #self._time = [0.0]
@@ -438,17 +443,18 @@ class RateStateFaultPatch(object):
             self._normal_stress_history = [self.normal_stress]
         else:
             with h5.File(path, mode="r") as fhist:
+                if gid is not None:
+                    fhist = fhist[gid]
                 for var in fhist:
-                    setattr(self, f"_{var}", [fhist[var][-1]])
+                    if readall:
+                        setattr(self, f"_{var}", fhist[var][()])
+                        print(
+                                "!! Make sure you are not using readall=True to"
+                                " restart a simulation from the last checkpoint !!"
+                                )
+                    else:
+                        setattr(self, f"_{var}", [fhist[var][-1]])
                 self._time_increments[-1] = 0.
-
-                #if last:
-                #    for var in fhist:
-                #        setattr(self, f"_{var}", [fhist[var][-1]])
-                #    self._time_increments[-1] = 0.
-                #else:
-                #    for var in fhist:
-                #        setattr(self, f"_{var}", fhist[var][()].tolist())
 
 
     def clean_history(self):
@@ -494,13 +500,14 @@ class RateStateFaultPatch(object):
         self.set_friction_to_steady_state()
         self.displacement = 0.0  # reset displacement
         self.state = 2  # state is now 2
+        # log stress at beginning of earthquake
+        self.shear_stress_0 = float(self.shear_stress)
+
         # print('Driving stress = {:.2e}MPa, friction = {:.2e}MPa'.format(self.shear_stress/1.e6, self.friction/1.e6))
 
     def state_2(self, t2_0=None, verbose=True):
         # self.d_dot_EQ  = 2. * self.beta * self.Delta_tau / self.lame2
-        # log stress at beginning of earthquake
-        self.stress_0 = float(self.shear_stress)
-        self.Delta_tau = self.shear_stress - self.friction
+        # self.Delta_tau = self.shear_stress - self.friction
         # sliding stops when shear_stress = friction (+ some overshooting)
         if t2_0 is None:
             t2_0 = self.find_t2_0()
@@ -513,7 +520,7 @@ class RateStateFaultPatch(object):
         self.shear_stress += self.shear_stress_rate * t2_0
         self.normal_stress += self.normal_stress_rate * t2_0
         # stress drop is stress difference between beginning and end
-        stress_drop = self.stress_0 - self.shear_stress
+        stress_drop = self.shear_stress_0 - self.shear_stress
         if verbose:
             print(
                 "Patch {:d}: Displacement EQ = {:.2e}m, Theta = {:.2e}s, Stress-drop = {:.2e}Pa".format(
@@ -522,6 +529,7 @@ class RateStateFaultPatch(object):
             )
         self.state = 0  # state is now 0
         self._coseismic_displacements.append(self.displacement)
+        self._stress_drop_history.append(stress_drop)
         self.displacement = 0.0  # reset displacement
         self.d_dot = self.tectonic_slip_speed
         self.set_theta_to_steady_state()
@@ -1107,10 +1115,16 @@ class RateStateFault(object):
         neighboring_patches=None,
         a_reduction_factor=0.1,
         V_V0_ratio_for_update=1.25,
+        num_threads=1,
         record_history=True,
         verbose=True,
         path=None,
     ):
+        if num_threads in [0, None, "all"]:
+            # num_threads = None means use all CPUs
+            num_threads = None
+        self.num_threads = num_threads
+        print(f"Number of threads is {self.num_threads}")
         if path is None and fault_patches is None:
             print("You need to specify fault_patches or path!")
             return
@@ -1385,8 +1399,10 @@ class RateStateFault(object):
         fp._transition_time = transition_time
 
     def evolve_next_patch(self):
-        for i in range(self.n_patches):
-            self._evolve_one_patch(i)
+        #for i in range(self.n_patches):
+        #    self._evolve_one_patch(i)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_threads) as exec:
+            output = list(exec.map(self._evolve_one_patch, range(self.n_patches)))
         t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
         # print(t / (24. * 3600.))
