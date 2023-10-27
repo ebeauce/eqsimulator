@@ -317,16 +317,16 @@ class RateStateFaultPatch(object):
         return np.asarray(self._theta_history)
 
     @property
-    def stress_drop_history(self):
-        return np.asarray(self._stress_drop_history)
+    def event_stress_drops(self):
+        return np.asarray(self._event_stress_drops)
 
     @property
     def event_timings(self):
         return np.asarray(self._event_timings)
 
     @property
-    def coseismic_displacements(self):
-        return np.asarray(self._coseismic_displacements)
+    def event_slips(self):
+        return np.asarray(self._event_slips)
 
     @property
     def coseismic_slip_history(self):
@@ -415,9 +415,9 @@ class RateStateFaultPatch(object):
             "_slip_history",
             "_slip_speed_history",
             "_theta_history",
-            "_stress_drop_history",
+            "_event_stress_drops",
             "_event_timings",
-            "_coseismic_displacements",
+            "_event_slips",
             "_coseismic_slip_history",
             "_time_increments",
             #"_time",
@@ -428,8 +428,8 @@ class RateStateFaultPatch(object):
             # initialize from scratch
             # -------- essential history variables -----
             self._event_timings = [0.0]
-            self._stress_drop_history = [0.0]
-            self._coseismic_displacements = [0.0]
+            self._event_stress_drops = [0.0]
+            self._event_slips = [0.0]
             # -------- optional history variables -------
             self._state_history = [self.state]
             self._transition_times_history = [0.0]
@@ -528,8 +528,8 @@ class RateStateFaultPatch(object):
                 )
             )
         self.state = 0  # state is now 0
-        self._coseismic_displacements.append(self.displacement)
-        self._stress_drop_history.append(stress_drop)
+        self._event_slips.append(self.displacement)
+        self._event_stress_drops.append(stress_drop)
         self.displacement = 0.0  # reset displacement
         self.d_dot = self.tectonic_slip_speed
         self.set_theta_to_steady_state()

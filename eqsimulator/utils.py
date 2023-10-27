@@ -89,7 +89,7 @@ def get_event_history(fault):
 
     list_events = []
     for n in range(fault.n_patches):
-        for k in range(fault.fault_patches[n].coseismic_displacements.size):
+        for k in range(fault.fault_patches[n].event_slips.size):
             list_events.append(
                 [
                     fault.fault_patches[n].event_timings[k],
@@ -97,8 +97,8 @@ def get_event_history(fault):
                     fault.fault_patches[n].x,
                     fault.fault_patches[n].y,
                     fault.fault_patches[n].z,
-                    fault.fault_patches[n].coseismic_displacements[k],
-                    fault.fault_patches[n].stress_drop_history[k],
+                    fault.fault_patches[n].event_slips[k],
+                    fault.fault_patches[n].event_stress_drops[k],
                 ]
             )
     list_events = sorted(list_events)  # order the list in chronological order
