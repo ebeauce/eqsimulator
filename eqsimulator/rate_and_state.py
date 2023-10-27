@@ -329,8 +329,8 @@ class RateStateFaultPatch(object):
         return np.asarray(self._event_slips)
 
     @property
-    def coseismic_slip_history(self):
-        return np.asarray(self._coseismic_slip_history)
+    def fault_slip_history(self):
+        return np.asarray(self._fault_slip_history)
 
     @property
     def mu_effective(self):
@@ -410,15 +410,15 @@ class RateStateFaultPatch(object):
         #                  history
         # --------------------------------------------------
         self._history_variables = [
+            "_event_stress_drops",
+            "_event_timings",
+            "_event_slips",
             "_state_history",
             "_transition_times_history",
             "_slip_history",
             "_slip_speed_history",
             "_theta_history",
-            "_event_stress_drops",
-            "_event_timings",
-            "_event_slips",
-            "_coseismic_slip_history",
+            "_fault_slip_history",
             "_time_increments",
             #"_time",
             "_shear_stress_history",
@@ -436,7 +436,7 @@ class RateStateFaultPatch(object):
             self._slip_history = [0.0]
             self._slip_speed_history = [self.d_dot]
             self._theta_history = [self.theta]
-            self._coseismic_slip_history = [0.0]
+            self._fault_slip_history = [0.0]
             self._time_increments = [0.0]
             #self._time = [0.0]
             self._shear_stress_history = [self.shear_stress]
@@ -565,16 +565,16 @@ class RateStateFaultPatch(object):
             list(self._normal_stress_history[-1] + self.normal_stress_rate * delta_time)
         )
         if self.state == 2:
-            self._coseismic_slip_history.extend(
-                list(self._coseismic_slip_history[-1] + delta_time * self.d_dot_EQ)
+            self._fault_slip_history.extend(
+                list(self._fault_slip_history[-1] + delta_time * self.d_dot_EQ)
             )
         elif self.state == 3:
-            self._coseismic_slip_history.extend(
-                list(self._coseismic_slip_history[-1] + delta_time * self.d_dot)
+            self._fault_slip_history.extend(
+                list(self._fault_slip_history[-1] + delta_time * self.d_dot)
             )
         else:
-            self._coseismic_slip_history.extend(
-                list(self._coseismic_slip_history[-1] + delta_time * 0.0)
+            self._fault_slip_history.extend(
+                list(self._fault_slip_history[-1] + delta_time * 0.0)
             )
 
     def evolve_current_state(self, duration, fault_object, patch_index):
