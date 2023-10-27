@@ -454,7 +454,8 @@ class RateStateFaultPatch(object):
                                 )
                     else:
                         setattr(self, f"_{var}", [fhist[var][-1]])
-                self._time_increments[-1] = 0.
+                if hasattr(self, "_time_increments"):
+                    self._time_increments[-1] = 0.
 
 
     def clean_history(self):
