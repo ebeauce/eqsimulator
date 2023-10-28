@@ -405,25 +405,37 @@ class RateStateFaultPatch(object):
             path=None,
             readall=False,
             gid=None,
+            history_variables=None
             ):
         # --------------------------------------------------
         #                  history
         # --------------------------------------------------
-        self._history_variables = [
-            "_event_stress_drops",
-            "_event_timings",
-            "_event_slips",
-            "_state_history",
-            "_transition_times_history",
-            "_slip_history",
-            "_slip_speed_history",
-            "_theta_history",
-            "_fault_slip_history",
-            "_time_increments",
-            #"_time",
-            "_shear_stress_history",
-            "_normal_stress_history",
-        ]
+        event_variables = [
+                "_event_stress_drops",
+                "_event_timings",
+                "_event_slips",
+                ]
+
+        if history_variables is None:
+            # by default, keep track of all variables
+            self._history_variables = [
+                "_state_history",
+                "_transition_times_history",
+                "_slip_history",
+                "_slip_speed_history",
+                "_theta_history",
+                "_fault_slip_history",
+                "_time_increments",
+                "_shear_stress_history",
+                "_normal_stress_history",
+            ] + event_variables
+        else:
+            self._history_variables = history_variables
+        self._non_event_history_variables = list(
+                set(self._history_variables).difference(
+                    event_variables
+                    )
+                )
         if path is None:
             # initialize from scratch
             # -------- essential history variables -----
@@ -491,7 +503,6 @@ class RateStateFaultPatch(object):
         if self.record_history:
             # -------- UPDATE HISTORY ----------
             self.update_history(t1_2)
-            self._event_timings.append(self.time[-1])
             # ----------------------------------
         self.shear_stress += self.shear_stress_rate * t1_2
         self.normal_stress += self.normal_stress_rate * t1_2
@@ -503,6 +514,7 @@ class RateStateFaultPatch(object):
         self.state = 2  # state is now 2
         # log stress at beginning of earthquake
         self.shear_stress_0 = float(self.shear_stress)
+        self._event_timings.append(self.time[-1])
 
         # print('Driving stress = {:.2e}MPa, friction = {:.2e}MPa'.format(self.shear_stress/1.e6, self.friction/1.e6))
 
@@ -1094,20 +1106,32 @@ class RateStateFaultPatch(object):
     def save_mechanical_state(self, path, gid=None, overwrite=True):
         with h5.File(path, mode="a") as fstate:
             if gid is not None:
-                if overwrite and gid in fstate:
-                    del fstate[gid]
+                #if overwrite and gid in fstate:
+                #    del fstate[gid]
                 if gid not in fstate:
                     fstate.create_group(gid)
                 fstate = fstate[gid]
             for var in self._mechanical_state_variables:
-                if overwrite and var in fstate:
-                    del fstate[var]
+                #if overwrite and var in fstate:
+                #    del fstate[var]
+                #if var == "a":
+                #    fstate.create_dataset(var, data=self.a_nominal)
+                #elif var == "start_time":
+                #    fstate.create_dataset(var, data=self.time[-1])
+                #else:
+                #    fstate.create_dataset(var, data=getattr(self, var))
                 if var == "a":
-                    fstate.create_dataset(var, data=self.a_nominal)
+                    var_ = self.a_nominal
                 elif var == "start_time":
-                    fstate.create_dataset(var, data=self.time[-1])
+                    var_ = self.time[-1]
                 else:
-                    fstate.create_dataset(var, data=getattr(self, var))
+                    var_ = getattr(self, var)
+                if var in fstate:
+                    # dataset already exists
+                    fstate[var][...] = var_
+                else:
+                    fstate.create_dataset(var, data=var_)
+
 
 class RateStateFault(object):
     def __init__(
@@ -1400,10 +1424,10 @@ class RateStateFault(object):
         fp._transition_time = transition_time
 
     def evolve_next_patch(self):
-        #for i in range(self.n_patches):
-        #    self._evolve_one_patch(i)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_threads) as exec:
-            output = list(exec.map(self._evolve_one_patch, range(self.n_patches)))
+        for i in range(self.n_patches):
+            self._evolve_one_patch(i)
+        #with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_threads) as exec:
+        #    output = list(exec.map(self._evolve_one_patch, range(self.n_patches)))
         t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
         # print(t / (24. * 3600.))
