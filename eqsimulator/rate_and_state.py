@@ -1140,16 +1140,10 @@ class RateStateFault(object):
         neighboring_patches=None,
         a_reduction_factor=0.1,
         V_V0_ratio_for_update=1.25,
-        num_threads=1,
         record_history=True,
         verbose=True,
         path=None,
     ):
-        if num_threads in [0, None, "all"]:
-            # num_threads = None means use all CPUs
-            num_threads = None
-        self.num_threads = num_threads
-        print(f"Number of threads is {self.num_threads}")
         if path is None and fault_patches is None:
             print("You need to specify fault_patches or path!")
             return
@@ -1426,8 +1420,6 @@ class RateStateFault(object):
     def evolve_next_patch(self):
         for i in range(self.n_patches):
             self._evolve_one_patch(i)
-        #with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_threads) as exec:
-        #    output = list(exec.map(self._evolve_one_patch, range(self.n_patches)))
         t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
         # print(t / (24. * 3600.))
