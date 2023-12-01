@@ -317,20 +317,20 @@ class RateStateFaultPatch(object):
         return np.asarray(self._theta_history)
 
     @property
-    def stress_drop_history(self):
-        return np.asarray(self._stress_drop_history)
+    def event_stress_drops(self):
+        return np.asarray(self._event_stress_drops)
 
     @property
     def event_timings(self):
         return np.asarray(self._event_timings)
 
     @property
-    def coseismic_displacements(self):
-        return np.asarray(self._coseismic_displacements)
+    def event_slips(self):
+        return np.asarray(self._event_slips)
 
     @property
-    def coseismic_slip_history(self):
-        return np.asarray(self._coseismic_slip_history)
+    def fault_slip_history(self):
+        return np.asarray(self._fault_slip_history)
 
     @property
     def mu_effective(self):
@@ -358,6 +358,7 @@ class RateStateFaultPatch(object):
                 "normal_stress",
                 "shear_stress",
                 "displacement",
+                "shear_stress_0",
                 "theta",
                 "friction",
                 "a",
@@ -390,6 +391,7 @@ class RateStateFaultPatch(object):
                 self.shear_stress = np.float64(
                     np.random.uniform(0.5, 0.9) * self.mu_0 * nornmal_stress
                 )
+            self.shear_stress_0 = float(self.shear_stress)
             self.normal_stress = np.float64(normal_stress)
             self.friction = (
                 friction  # will be initialized to some non-zero value at the end of state 0
@@ -401,54 +403,71 @@ class RateStateFaultPatch(object):
     def initialize_history(
             self,
             path=None,
-            #last=True
+            readall=False,
+            gid=None,
+            history_variables=None
             ):
         # --------------------------------------------------
         #                  history
         # --------------------------------------------------
-        self._history_variables = [
-            "_state_history",
-            "_transition_times_history",
-            "_slip_history",
-            "_slip_speed_history",
-            "_theta_history",
-            "_stress_drop_history",
-            "_event_timings",
-            "_coseismic_displacements",
-            "_coseismic_slip_history",
-            "_time_increments",
-            #"_time",
-            "_shear_stress_history",
-            "_normal_stress_history",
-        ]
+        event_variables = [
+                "_event_stress_drops",
+                "_event_timings",
+                "_event_slips",
+                ]
+
+        if history_variables is None:
+            # by default, keep track of all variables
+            self._history_variables = [
+                "_state_history",
+                "_transition_times_history",
+                "_slip_history",
+                "_slip_speed_history",
+                "_theta_history",
+                "_fault_slip_history",
+                "_time_increments",
+                "_shear_stress_history",
+                "_normal_stress_history",
+            ] + event_variables
+        else:
+            self._history_variables = history_variables
+        self._non_event_history_variables = list(
+                set(self._history_variables).difference(
+                    event_variables
+                    )
+                )
         if path is None:
             # initialize from scratch
+            # -------- essential history variables -----
+            self._event_timings = [0.0]
+            self._event_stress_drops = [0.0]
+            self._event_slips = [0.0]
+            # -------- optional history variables -------
             self._state_history = [self.state]
             self._transition_times_history = [0.0]
             self._slip_history = [0.0]
             self._slip_speed_history = [self.d_dot]
             self._theta_history = [self.theta]
-            self._stress_drop_history = [0.0]
-            self._event_timings = [0.0]
-            self._coseismic_displacements = [0.0]
-            self._coseismic_slip_history = [0.0]
+            self._fault_slip_history = [0.0]
             self._time_increments = [0.0]
             #self._time = [0.0]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
         else:
             with h5.File(path, mode="r") as fhist:
+                if gid is not None:
+                    fhist = fhist[gid]
                 for var in fhist:
-                    setattr(self, f"_{var}", [fhist[var][-1]])
-                self._time_increments[-1] = 0.
-
-                #if last:
-                #    for var in fhist:
-                #        setattr(self, f"_{var}", [fhist[var][-1]])
-                #    self._time_increments[-1] = 0.
-                #else:
-                #    for var in fhist:
-                #        setattr(self, f"_{var}", fhist[var][()].tolist())
+                    if readall:
+                        setattr(self, f"_{var}", fhist[var][()])
+                        print(
+                                "!! Make sure you are not using readall=True to"
+                                " restart a simulation from the last checkpoint !!"
+                                )
+                    else:
+                        setattr(self, f"_{var}", [fhist[var][-1]])
+                if hasattr(self, "_time_increments"):
+                    self._time_increments[-1] = 0.
 
 
     def clean_history(self):
@@ -484,7 +503,6 @@ class RateStateFaultPatch(object):
         if self.record_history:
             # -------- UPDATE HISTORY ----------
             self.update_history(t1_2)
-            self._event_timings.append(self.time[-1])
             # ----------------------------------
         self.shear_stress += self.shear_stress_rate * t1_2
         self.normal_stress += self.normal_stress_rate * t1_2
@@ -494,13 +512,15 @@ class RateStateFaultPatch(object):
         self.set_friction_to_steady_state()
         self.displacement = 0.0  # reset displacement
         self.state = 2  # state is now 2
+        # log stress at beginning of earthquake
+        self.shear_stress_0 = float(self.shear_stress)
+        self._event_timings.append(self.time[-1])
+
         # print('Driving stress = {:.2e}MPa, friction = {:.2e}MPa'.format(self.shear_stress/1.e6, self.friction/1.e6))
 
     def state_2(self, t2_0=None, verbose=True):
         # self.d_dot_EQ  = 2. * self.beta * self.Delta_tau / self.lame2
-        # log stress at beginning of earthquake
-        self.stress_0 = float(self.shear_stress)
-        self.Delta_tau = self.shear_stress - self.friction
+        # self.Delta_tau = self.shear_stress - self.friction
         # sliding stops when shear_stress = friction (+ some overshooting)
         if t2_0 is None:
             t2_0 = self.find_t2_0()
@@ -513,7 +533,7 @@ class RateStateFaultPatch(object):
         self.shear_stress += self.shear_stress_rate * t2_0
         self.normal_stress += self.normal_stress_rate * t2_0
         # stress drop is stress difference between beginning and end
-        stress_drop = self.stress_0 - self.shear_stress
+        stress_drop = self.shear_stress_0 - self.shear_stress
         if verbose:
             print(
                 "Patch {:d}: Displacement EQ = {:.2e}m, Theta = {:.2e}s, Stress-drop = {:.2e}Pa".format(
@@ -521,7 +541,8 @@ class RateStateFaultPatch(object):
                 )
             )
         self.state = 0  # state is now 0
-        self._coseismic_displacements.append(self.displacement)
+        self._event_slips.append(self.displacement)
+        self._event_stress_drops.append(stress_drop)
         self.displacement = 0.0  # reset displacement
         self.d_dot = self.tectonic_slip_speed
         self.set_theta_to_steady_state()
@@ -556,16 +577,16 @@ class RateStateFaultPatch(object):
             list(self._normal_stress_history[-1] + self.normal_stress_rate * delta_time)
         )
         if self.state == 2:
-            self._coseismic_slip_history.extend(
-                list(self._coseismic_slip_history[-1] + delta_time * self.d_dot_EQ)
+            self._fault_slip_history.extend(
+                list(self._fault_slip_history[-1] + delta_time * self.d_dot_EQ)
             )
         elif self.state == 3:
-            self._coseismic_slip_history.extend(
-                list(self._coseismic_slip_history[-1] + delta_time * self.d_dot)
+            self._fault_slip_history.extend(
+                list(self._fault_slip_history[-1] + delta_time * self.d_dot)
             )
         else:
-            self._coseismic_slip_history.extend(
-                list(self._coseismic_slip_history[-1] + delta_time * 0.0)
+            self._fault_slip_history.extend(
+                list(self._fault_slip_history[-1] + delta_time * 0.0)
             )
 
     def evolve_current_state(self, duration, fault_object, patch_index):
@@ -1085,20 +1106,32 @@ class RateStateFaultPatch(object):
     def save_mechanical_state(self, path, gid=None, overwrite=True):
         with h5.File(path, mode="a") as fstate:
             if gid is not None:
-                if overwrite and gid in fstate:
-                    del fstate[gid]
+                #if overwrite and gid in fstate:
+                #    del fstate[gid]
                 if gid not in fstate:
                     fstate.create_group(gid)
                 fstate = fstate[gid]
             for var in self._mechanical_state_variables:
-                if overwrite and var in fstate:
-                    del fstate[var]
+                #if overwrite and var in fstate:
+                #    del fstate[var]
+                #if var == "a":
+                #    fstate.create_dataset(var, data=self.a_nominal)
+                #elif var == "start_time":
+                #    fstate.create_dataset(var, data=self.time[-1])
+                #else:
+                #    fstate.create_dataset(var, data=getattr(self, var))
                 if var == "a":
-                    fstate.create_dataset(var, data=self.a_nominal)
+                    var_ = self.a_nominal
                 elif var == "start_time":
-                    fstate.create_dataset(var, data=self.time[-1])
+                    var_ = self.time[-1]
                 else:
-                    fstate.create_dataset(var, data=getattr(self, var))
+                    var_ = getattr(self, var)
+                if var in fstate:
+                    # dataset already exists
+                    fstate[var][...] = var_
+                else:
+                    fstate.create_dataset(var, data=var_)
+
 
 class RateStateFault(object):
     def __init__(
