@@ -430,7 +430,10 @@ class RateStateFaultPatch(object):
                 "_normal_stress_history",
             ] + event_variables
         else:
-            self._history_variables = history_variables
+            self._history_variables = history_variables + event_variables
+        for i in range(len(self._history_variables)):
+            if self._history_variables[i][0] != "_":
+                self._history_variables[i] = "_" + self._history_variables[i]
         self._non_event_history_variables = list(
                 set(self._history_variables).difference(
                     event_variables
@@ -457,7 +460,11 @@ class RateStateFaultPatch(object):
             with h5.File(path, mode="r") as fhist:
                 if gid is not None:
                     fhist = fhist[gid]
-                for var in fhist:
+                for var in self._history_variables:
+                    var = var[1:]
+                    if var not in fhist:
+                        print(f"Could not find {var} in the file!")
+                        continue
                     if readall:
                         setattr(self, f"_{var}", fhist[var][()])
                         print(
