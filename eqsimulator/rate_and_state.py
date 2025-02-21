@@ -793,11 +793,11 @@ class RateStateFaultPatch(object):
             # factor 0.98 to relax effects of numerical imprecision
             # could happen because of the instant drop in steady state friction
             # associated with the drop in 'a' on patches neighbors to rupturing patches
-            # print(
-            #        'Driving stress: {:.2e}MPa, Friction: {:.2e}MPa'.format(
-            #            self.shear_stress / 1.e6, self.steady_state_friction(0.) / 1.e6
-            #            )
-            #        )
+            #print(
+            #       'Driving stress: {:.2e}MPa, Friction: {:.2e}MPa'.format(
+            #           self.shear_stress / 1.e6, self.steady_state_friction(0.) / 1.e6
+            #           )
+            #       )
             return 0.0
         first_guess_time = 0.1
         first_guess_diff = (
@@ -1429,20 +1429,36 @@ class RateStateFault(object):
             self._evolve_one_patch(i)
         t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
-        # print(t / (24. * 3600.))
+        if t.min() < 0.0:
+            # this may happen after initialization when patches
+            # were not in the state they should have been in
+            # or when a drops due to neighboring rupture
+            t[t < 0.0] = 10.0 ** (-DECIMAL_PRECISION)
+            evolving_patch_indexes = np.where(t == t.min())[0]
+            ## why does this happen??
+            #for idx in evolving_patch_indexes:
+            #    print(
+            #        self.fault_patches[idx].fault_patch_id,
+            #        self.fault_patches[idx].state,
+            #        f"{self.fault_patches[idx].shear_stress / 1.0e6:.2f}",
+            #        f"{self.fault_patches[idx].friction / 1.0e6:.2f}",
+            #        f"{self.fault_patches[idx].a:.2e}",
+            #        f"{self.fault_patches[idx].a_nominal:.2e}",
+            #    )
         evolving_patch_indexes = np.where(t == t.min())[0]
         if len(evolving_patch_indexes) == 0:
             print(t.min(), t)
-        # print t.min()
-        if t.min() < 0.0:
-            # why does this happen??
-            # for idx in evolving_patch_indexes:
-            #    print(
-            #        self.fault_patches[idx].state,
-            #        self.fault_patches[idx].shear_stress / 1.0e6,
-            #        self.fault_patches[idx].friction / 1.0e6,
-            #    )
-            t[t < 0.0] = 10.0 ** (-DECIMAL_PRECISION)
+        #print(f"Minimum time is: ", t.min())
+        #if t.min() == 0.:
+        #    for idx in evolving_patch_indexes:
+        #       print(
+        #           self.fault_patches[idx].fault_patch_id,
+        #           self.fault_patches[idx].state,
+        #           self.fault_patches[idx].shear_stress / 1.0e6,
+        #           self.fault_patches[idx].friction / 1.0e6,
+        #           self.fault_patches[idx].a,
+        #           self.fault_patches[idx].a_nominal,
+        #       )
         times = np.hstack(
             (t.min(), np.zeros(evolving_patch_indexes.size - 1, dtype=np.float64))
         )
