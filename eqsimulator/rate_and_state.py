@@ -1433,7 +1433,7 @@ class RateStateFault(object):
             # this may happen after initialization when patches
             # were not in the state they should have been in
             # or when a drops due to neighboring rupture
-            t[t < 0.0] = 10.0 ** (-DECIMAL_PRECISION)
+            t[t <= 0.0] = 10.0 ** (-DECIMAL_PRECISION)
             evolving_patch_indexes = np.where(t == t.min())[0]
             ## why does this happen??
             #for idx in evolving_patch_indexes:
