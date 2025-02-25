@@ -821,16 +821,9 @@ class RateStateFaultPatch(object):
                 np.log(first_guess_time / 10.0),  # fprime=self.newton_fprime
             )
             t0_1 = np.exp(t0_1)
-            # t0_1 = newton(
-            #        self.newton_f, first_guess_time / 10., fprime=self.newton_fprime
-            #        )
         except RuntimeError:
-            # Psi = lambda t: (
-            #    (self.shear_stress + self.shear_stress_rate * t)
-            #    - self.steady_state_friction(t)
-            # )
-            # opt_output, cov = leastsq(Psi, first_guess_time / 10.)
-            # t0_1 = opt_output[0]
+            # expressing the loss function with log terms appears
+            # to be much more stable
             Psi = lambda ln_t: (
                 (self.shear_stress + self.shear_stress_rate * np.exp(ln_t))
                 - self.steady_state_friction(np.exp(ln_t))
@@ -839,11 +832,8 @@ class RateStateFaultPatch(object):
             t0_1 = opt_output[0]
             t0_1 = np.exp(t0_1)
         if t0_1 < 0.0:
-            # print(self.shear_stress / 1.e6, self.steady_state_friction(0.) / 1.e6)
-            # return np.finfo(np.float64).max
             return 0.0
         else:
-            # return np.round(t0_1, decimals=DECIMAL_PRECISION)
             return t0_1
 
     def find_t1_2(self):
@@ -880,7 +870,6 @@ class RateStateFaultPatch(object):
         # which kills the event.
         # return self.adaptive_rounding(self.overshoot * t2_0)
         return self.overshoot * t2_0
-        # return np.round(self.overshoot * t2_0, decimals=DECIMAL_PRECISION)
 
     def find_t3_1(self):
         """
@@ -962,9 +951,19 @@ class RateStateFaultPatch(object):
         return max(2.0e-5, num_tc * characteristic_time)
 
     def update_H(self):
+        """
+
+        Should I recast as a property?
+
+        """
         self.H = -self.k / self.normal_stress + self.sum_term
 
     def update_friction(self):
+        """
+
+        Should I recast as a property?
+
+        """
         self.friction = self.normal_stress * (
             self.mu_0
             + self.a_nominal * np.log(self.d_dot / self.d_dot_star)
@@ -1425,10 +1424,13 @@ class RateStateFault(object):
         fp._transition_time = transition_time
 
     def evolve_next_patch(self):
+        #t1 = give_time()
         for i in range(self.n_patches):
             self._evolve_one_patch(i)
         t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
+        #t2 = give_time()
+        #print(f"----- {t2-t1:.2f}sec to compute all transition times.")
         if t.min() < 0.0:
             # this may happen after initialization when patches
             # were not in the state they should have been in
@@ -1459,6 +1461,7 @@ class RateStateFault(object):
         #           self.fault_patches[idx].a,
         #           self.fault_patches[idx].a_nominal,
         #       )
+        #t1 = give_time()
         times = np.hstack(
             (t.min(), np.zeros(evolving_patch_indexes.size - 1, dtype=np.float64))
         )
@@ -1509,11 +1512,16 @@ class RateStateFault(object):
         #            self.fault_patches[j].shear_stress_rate,
         #            decimals=DECIMAL_PRECISION
         #        )
+        #t2 = give_time()
+        #print(f"----- {t2-t1:.2f}sec to evolve patches")
+        #t1 = give_time()
         if self.record_history:
             #self._time.append(times[0] + self.time[-1])
             self._time_increments.append(times[0])
             self._shear_stress_history.append(self.shear_stress)
             self._normal_stress_history.append(self.normal_stress)
+        #t2 = give_time()
+        #print(f"----- {t2-t1:.2f}sec to record history")
 
     def update_all_state_01(self, evolving_patch_idx, t0_1):
         """
