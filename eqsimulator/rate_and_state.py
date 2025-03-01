@@ -184,6 +184,10 @@ class RateStateFaultPatch(object):
         # ---------------------------------------------
         self._set_property_based_variables()
 
+    @property
+    def H(self):
+        return - self.k / self.normal_stress + self.sum_term
+
     def _set_property_based_variables(self):
         self.mu_0_ = np.float64(
             self.mu_0
@@ -653,7 +657,7 @@ class RateStateFaultPatch(object):
                         / (self.a - self.b)
                     ),
                 )
-            self.update_H()
+            #self.update_H()
             if self.record_history:
                 self.update_history(duration)
 
@@ -950,13 +954,13 @@ class RateStateFaultPatch(object):
         )  # time to change shear stress of 1%
         return max(2.0e-5, num_tc * characteristic_time)
 
-    def update_H(self):
-        """
+    #def update_H(self):
+    #    """
 
-        Should I recast as a property?
+    #    Should I recast as a property?
 
-        """
-        self.H = -self.k / self.normal_stress + self.sum_term
+    #    """
+    #    self.H = -self.k / self.normal_stress + self.sum_term
 
     def update_friction(self):
         """
@@ -1340,7 +1344,7 @@ class RateStateFault(object):
                 )
             )
             fp.k = np.float64(abs(self.Kij_shear[i, i]))
-            fp.update_H()
+            #fp.update_H()
 
         # initialize stressing rates
         self.update_stressing_rates()
@@ -1348,7 +1352,7 @@ class RateStateFault(object):
             if fp.state == 3:
                 # fault patch was initialized from previous simulation
                 continue
-            elif fp.k > fp.critical_stiffness():
+            elif fp.a > fp.b:
                 # stable patch (creeping)
                 fp.stable = True
                 fp.state = 3
@@ -1366,7 +1370,9 @@ class RateStateFault(object):
                 print(f"Patch {i} is stable.")
                 fp.d_dot_0 = np.float64(fp.d_dot)
             else:
-                # unstable patch
+                # unstable patch or conditionally stable
+                if fp.k > fp.critical_stiffness():
+                    print(f"Patch {i} is conditionally stable.")
                 fp.stable = False
                 fp.d_dot_0 = np.float64(fp.d_dot)
         # update stressing rates to account for creeping patches
