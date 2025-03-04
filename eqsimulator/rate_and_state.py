@@ -43,7 +43,7 @@ class RateStateFaultPatch(object):
         tectonic_stressing_rate=None,
         path=None,
         gid=None,
-        fault_patch_id=None
+        fault_patch_id=None,
     ):
         """
         A class representing a rate-state fault patch simulation.
@@ -136,7 +136,7 @@ class RateStateFaultPatch(object):
             "dip_angle",
             "strike_angle",
             "right_lateral_faulting",
-            "normal_faulting"
+            "normal_faulting",
         ]
         if path:
             # use parameters from file and ignore values given here
@@ -186,7 +186,7 @@ class RateStateFaultPatch(object):
 
     @property
     def H(self):
-        return - self.k / self.normal_stress + self.sum_term
+        return -self.k / self.normal_stress + self.sum_term
 
     def _set_property_based_variables(self):
         self.mu_0_ = np.float64(
@@ -286,7 +286,7 @@ class RateStateFaultPatch(object):
     @property
     def time(self):
         return self.start_time + np.cumsum(np.asarray(self._time_increments))
-        #return np.asarray(self._time)
+        # return np.asarray(self._time)
 
     @property
     def time_increments(self):
@@ -350,7 +350,7 @@ class RateStateFaultPatch(object):
         friction=0.0,
         a=None,
         initial_shear_stress=None,
-        start_time=0.,
+        start_time=0.0,
         path=None,
         gid=None,
     ):
@@ -358,19 +358,19 @@ class RateStateFaultPatch(object):
         #       mechanical state variables
         # ------------------------------------------
         self._mechanical_state_variables = [
-                "state",
-                "normal_stress",
-                "shear_stress",
-                "displacement",
-                "shear_stress_0",
-                "theta",
-                "friction",
-                "a",
-                "d_dot",
-                "shear_stress_rate",
-                "normal_stress_rate",
-                "start_time",
-                ]
+            "state",
+            "normal_stress",
+            "shear_stress",
+            "displacement",
+            "shear_stress_0",
+            "theta",
+            "friction",
+            "a",
+            "d_dot",
+            "shear_stress_rate",
+            "normal_stress_rate",
+            "start_time",
+        ]
         if path:
             # use parameters from file and ignore values given here
             with h5.File(path, mode="r") as fstate:
@@ -389,36 +389,30 @@ class RateStateFaultPatch(object):
                 self.shear_stress = np.float64(0.8 * self.mu_0 * normal_stress)
             elif isinstance(initial_shear_stress, float):
                 self.shear_stress = np.float64(
-                        initial_shear_stress * self.mu_0 * normal_stress
-                        )
+                    initial_shear_stress * self.mu_0 * normal_stress
+                )
             elif initial_shear_stress == "random":
                 self.shear_stress = np.float64(
                     np.random.uniform(0.5, 0.9) * self.mu_0 * nornmal_stress
                 )
             self.shear_stress_0 = float(self.shear_stress)
             self.normal_stress = np.float64(normal_stress)
-            self.friction = (
-                friction  # will be initialized to some non-zero value at the end of state 0
-            )
+            self.friction = friction  # will be initialized to some non-zero value at the end of state 0
             self.shear_stress_rate = None
             self.normal_stress_rate = None
-            self.start_time = 0.
+            self.start_time = 0.0
 
     def initialize_history(
-            self,
-            path=None,
-            readall=False,
-            gid=None,
-            history_variables=None
-            ):
+        self, path=None, readall=False, gid=None, history_variables=None
+    ):
         # --------------------------------------------------
         #                  history
         # --------------------------------------------------
         event_variables = [
-                "_event_stress_drops",
-                "_event_timings",
-                "_event_slips",
-                ]
+            "_event_stress_drops",
+            "_event_timings",
+            "_event_slips",
+        ]
 
         if history_variables is None:
             # by default, keep track of all variables
@@ -439,10 +433,8 @@ class RateStateFaultPatch(object):
             if self._history_variables[i][0] != "_":
                 self._history_variables[i] = "_" + self._history_variables[i]
         self._non_event_history_variables = list(
-                set(self._history_variables).difference(
-                    event_variables
-                    )
-                )
+            set(self._history_variables).difference(event_variables)
+        )
         if path is None:
             # initialize from scratch
             # -------- essential history variables -----
@@ -457,7 +449,7 @@ class RateStateFaultPatch(object):
             self._theta_history = [self.theta]
             self._fault_slip_history = [0.0]
             self._time_increments = [0.0]
-            #self._time = [0.0]
+            # self._time = [0.0]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
         else:
@@ -472,14 +464,13 @@ class RateStateFaultPatch(object):
                     if readall:
                         setattr(self, f"_{var}", fhist[var][()])
                         print(
-                                "!! Make sure you are not using readall=True to"
-                                " restart a simulation from the last checkpoint !!"
-                                )
+                            "!! Make sure you are not using readall=True to"
+                            " restart a simulation from the last checkpoint !!"
+                        )
                     else:
                         setattr(self, f"_{var}", [fhist[var][-1]])
                 if hasattr(self, "_time_increments"):
-                    self._time_increments[-1] = 0.
-
+                    self._time_increments[-1] = 0.0
 
     def clean_history(self):
         if self.record_history:
@@ -579,7 +570,7 @@ class RateStateFaultPatch(object):
         )
         delta_time = total_time - total_time[0]
         displacement = delta_time * self.d_dot
-        #self._time.extend(total_time.tolist())
+        # self._time.extend(total_time.tolist())
         self._time_increments.extend(delta_time.tolist())
         self._shear_stress_history.extend(
             list(self._shear_stress_history[-1] + self.shear_stress_rate * delta_time)
@@ -657,7 +648,7 @@ class RateStateFaultPatch(object):
                         / (self.a - self.b)
                     ),
                 )
-            #self.update_H()
+            # self.update_H()
             if self.record_history:
                 self.update_history(duration)
 
@@ -797,7 +788,7 @@ class RateStateFaultPatch(object):
             # factor 0.98 to relax effects of numerical imprecision
             # could happen because of the instant drop in steady state friction
             # associated with the drop in 'a' on patches neighbors to rupturing patches
-            #print(
+            # print(
             #       'Driving stress: {:.2e}MPa, Friction: {:.2e}MPa'.format(
             #           self.shear_stress / 1.e6, self.steady_state_friction(0.) / 1.e6
             #           )
@@ -954,7 +945,7 @@ class RateStateFaultPatch(object):
         )  # time to change shear stress of 1%
         return max(2.0e-5, num_tc * characteristic_time)
 
-    #def update_H(self):
+    # def update_H(self):
     #    """
 
     #    Should I recast as a property?
@@ -1082,20 +1073,16 @@ class RateStateFaultPatch(object):
                 if var not in fhist:
                     # initialize data set
                     fhist.create_dataset(
-                            var,
-                            data=time_series,
-                            compression="gzip",
-                            chunks=True,
-                            maxshape=(None,)
-                            )
+                        var,
+                        data=time_series,
+                        compression="gzip",
+                        chunks=True,
+                        maxshape=(None,),
+                    )
                 else:
                     # append to existing data set
-                    fhist[var].resize(
-                            fhist[var].shape[0] + len(time_series),
-                            axis=0
-                            )
-                    fhist[var][-len(time_series):] = time_series
-
+                    fhist[var].resize(fhist[var].shape[0] + len(time_series), axis=0)
+                    fhist[var][-len(time_series) :] = time_series
 
     def save_properties(self, path, gid=None, overwrite=True):
         with h5.File(path, mode="a") as fprop:
@@ -1116,19 +1103,19 @@ class RateStateFaultPatch(object):
     def save_mechanical_state(self, path, gid=None, overwrite=True):
         with h5.File(path, mode="a") as fstate:
             if gid is not None:
-                #if overwrite and gid in fstate:
+                # if overwrite and gid in fstate:
                 #    del fstate[gid]
                 if gid not in fstate:
                     fstate.create_group(gid)
                 fstate = fstate[gid]
             for var in self._mechanical_state_variables:
-                #if overwrite and var in fstate:
+                # if overwrite and var in fstate:
                 #    del fstate[var]
-                #if var == "a":
+                # if var == "a":
                 #    fstate.create_dataset(var, data=self.a_nominal)
-                #elif var == "start_time":
+                # elif var == "start_time":
                 #    fstate.create_dataset(var, data=self.time[-1])
-                #else:
+                # else:
                 #    fstate.create_dataset(var, data=getattr(self, var))
                 if var == "a":
                     var_ = self.a_nominal
@@ -1164,13 +1151,11 @@ class RateStateFault(object):
                 gids = list(fprop.keys())
                 print(gids)
             self.fault_patches = [
-                    RateStateFaultPatch(
-                        path=path,
-                        gid=gids[i],
-                        record_history=record_history
-                        )
-                    for i in range(len(gids))
-                    ]
+                RateStateFaultPatch(
+                    path=path, gid=gids[i], record_history=record_history
+                )
+                for i in range(len(gids))
+            ]
         for i, fp in enumerate(self.fault_patches):
             if fp.fault_patch_id is None:
                 fp.fault_patch_id = i
@@ -1181,9 +1166,7 @@ class RateStateFault(object):
                 fp.neighbors = []
         self.verbose = verbose
         self.n_patches = len(self.fault_patches)
-        self.coords = np.asarray(
-                [[fp.x, fp.y, fp.z] for fp in self.fault_patches]
-                )
+        self.coords = np.asarray([[fp.x, fp.y, fp.z] for fp in self.fault_patches])
         self.a_reduction_factor = a_reduction_factor
         self.V_V0_ratio_for_update = V_V0_ratio_for_update
         self.fault_area = sum([fp.area for fp in self.fault_patches])
@@ -1223,10 +1206,8 @@ class RateStateFault(object):
     def initialize_mechanical_state(self, path=None):
         if path is not None:
             for fp in self.fault_patches:
-                fp.initialize_mechanical_state(
-                        path=path, gid=str(fp.fault_patch_id)
-                        )
-        #if path is None:
+                fp.initialize_mechanical_state(path=path, gid=str(fp.fault_patch_id))
+        # if path is None:
         self.Kij_shear = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         self.Kij_normal = np.zeros((self.n_patches, self.n_patches), dtype=np.float64)
         tectonic_slip_speeds = np.zeros(self.n_patches, dtype=np.float64)
@@ -1284,7 +1265,7 @@ class RateStateFault(object):
                     print(
                         "Displacement field calculation failed for interactions "
                         f"between patch {i} and patch {j}!"
-                        )
+                    )
                 self.Kij_shear[i, j] = np.dot(traction, -fp.p)
                 # the normal is defined going outward of the fault plane, but normal stress is counted positive for compressional stresses, hence x-1
                 self.Kij_normal[i, j] += np.dot(traction, normal_bloc) * -1.0
@@ -1344,7 +1325,7 @@ class RateStateFault(object):
                 )
             )
             fp.k = np.float64(abs(self.Kij_shear[i, i]))
-            #fp.update_H()
+            # fp.update_H()
 
         # initialize stressing rates
         self.update_stressing_rates()
@@ -1361,19 +1342,15 @@ class RateStateFault(object):
                 # when
                 fp.set_theta_to_steady_state()
                 fp.set_friction_to_steady_state()
-                fp.shear_stress = self.fault_patches[
-                    i
-                ].friction  # stable steady state
-                fp.shear_stress_history[0] = self.fault_patches[
-                    i
-                ].shear_stress
+                fp.shear_stress = self.fault_patches[i].friction  # stable steady state
+                fp.shear_stress_history[0] = self.fault_patches[i].shear_stress
                 print(f"Patch {i} is stable.")
                 fp.d_dot_0 = np.float64(fp.d_dot)
             else:
                 # unstable patch or conditionally stable
-                if fp.k > fp.critical_stiffness():
-                    print(f"Patch {i} is conditionally stable.")
-                    raise("Conditionally stable solutions are not implemented.")
+                assert (
+                    fp.k < fp.critical_stiffness()
+                ), "K_C too low. Conditionally stable solutions are not implemented."
                 fp.stable = False
                 fp.d_dot_0 = np.float64(fp.d_dot)
         # update stressing rates to account for creeping patches
@@ -1382,15 +1359,14 @@ class RateStateFault(object):
         if self.record_history:
             for fp in self.fault_patches:
                 fp.initialize_history()
-            self._time_increments = [0.]
+            self._time_increments = [0.0]
             self._shear_stress_history = [self.shear_stress]
             self._normal_stress_history = [self.normal_stress]
             self._history_variables = [
-                    "_time_increments",
-                    "_shear_stress_history",
-                    "_normal_stress_history",
-                    ]
-
+                "_time_increments",
+                "_shear_stress_history",
+                "_normal_stress_history",
+            ]
 
     def _evolve_one_patch(self, patch_index):
         fp = self.fault_patches[patch_index]
@@ -1403,11 +1379,11 @@ class RateStateFault(object):
                 transition_time = t0_1
                 ## ---------------------------------
                 ## for the future, when I implemented conditionally stable behavior
-                #t0_3 = fp.find_tX_3()
-                #if t0_1 < t0_3:
+                # t0_3 = fp.find_tX_3()
+                # if t0_1 < t0_3:
                 #    fp.next_state = 1
                 #    transition_time = t0_1
-                #else:
+                # else:
                 #    fp.next_state = 3
                 #    transition_time = t0_3
                 ## ---------------------------------
@@ -1417,11 +1393,11 @@ class RateStateFault(object):
                 transition_time = t1_2
                 ## ---------------------------------
                 ## for the future, when I implemented conditionally stable behavior
-                #t1_3 = fp.find_tX_3()
-                #if t1_2 < t1_3:
+                # t1_3 = fp.find_tX_3()
+                # if t1_2 < t1_3:
                 #    fp.next_state = 2
                 #    transition_time = t1_2
-                #else:
+                # else:
                 #    fp.next_state = 3
                 #    transition_time = t1_3
             elif fp.state == 2:
@@ -1434,24 +1410,24 @@ class RateStateFault(object):
                 # t3_3 = fp.find_t3_tau_update(num_tc=1.0)
                 ## ---------------------------------
                 ## for the future, when I implemented conditionally stable behavior
-                #t3_1 = fp.find_t3_1()
-                #if t3_3 < t3_1:
+                # t3_1 = fp.find_t3_1()
+                # if t3_3 < t3_1:
                 #    fp.next_state = 3
                 #    transition_time = t3_3
-                #else:
+                # else:
                 #    fp.next_state = 1
                 #    transition_time = t3_1
                 ## ---------------------------------
         fp._transition_time = transition_time
 
     def evolve_next_patch(self):
-        #t1 = give_time()
+        # t1 = give_time()
         for i in range(self.n_patches):
             self._evolve_one_patch(i)
         t = [fp._transition_time for fp in self.fault_patches]
         t = np.round(t, decimals=DECIMAL_PRECISION)
-        #t2 = give_time()
-        #print(f"----- {t2-t1:.2f}sec to compute all transition times.")
+        # t2 = give_time()
+        # print(f"----- {t2-t1:.2f}sec to compute all transition times.")
         if t.min() < 0.0:
             # this may happen after initialization when patches
             # were not in the state they should have been in
@@ -1459,7 +1435,7 @@ class RateStateFault(object):
             t[t <= 0.0] = 10.0 ** (-DECIMAL_PRECISION)
             evolving_patch_indexes = np.where(t == t.min())[0]
             ## why does this happen??
-            #for idx in evolving_patch_indexes:
+            # for idx in evolving_patch_indexes:
             #    print(
             #        self.fault_patches[idx].fault_patch_id,
             #        self.fault_patches[idx].state,
@@ -1471,8 +1447,8 @@ class RateStateFault(object):
         evolving_patch_indexes = np.where(t == t.min())[0]
         if len(evolving_patch_indexes) == 0:
             print(t.min(), t)
-        #print(f"Minimum time is: ", t.min())
-        #if t.min() == 0.:
+        # print(f"Minimum time is: ", t.min())
+        # if t.min() == 0.:
         #    for idx in evolving_patch_indexes:
         #       print(
         #           self.fault_patches[idx].fault_patch_id,
@@ -1482,7 +1458,7 @@ class RateStateFault(object):
         #           self.fault_patches[idx].a,
         #           self.fault_patches[idx].a_nominal,
         #       )
-        #t1 = give_time()
+        # t1 = give_time()
         times = np.hstack(
             (t.min(), np.zeros(evolving_patch_indexes.size - 1, dtype=np.float64))
         )
@@ -1533,16 +1509,16 @@ class RateStateFault(object):
         #            self.fault_patches[j].shear_stress_rate,
         #            decimals=DECIMAL_PRECISION
         #        )
-        #t2 = give_time()
-        #print(f"----- {t2-t1:.2f}sec to evolve patches")
-        #t1 = give_time()
+        # t2 = give_time()
+        # print(f"----- {t2-t1:.2f}sec to evolve patches")
+        # t1 = give_time()
         if self.record_history:
-            #self._time.append(times[0] + self.time[-1])
+            # self._time.append(times[0] + self.time[-1])
             self._time_increments.append(times[0])
             self._shear_stress_history.append(self.shear_stress)
             self._normal_stress_history.append(self.normal_stress)
-        #t2 = give_time()
-        #print(f"----- {t2-t1:.2f}sec to record history")
+        # t2 = give_time()
+        # print(f"----- {t2-t1:.2f}sec to record history")
 
     def update_all_state_01(self, evolving_patch_idx, t0_1):
         """
@@ -1727,14 +1703,14 @@ class RateStateFault(object):
     def save_mechanical_state(self, path, overwrite=True):
         for fp in self.fault_patches:
             fp.save_mechanical_state(
-                    path, gid=str(fp.fault_patch_id), overwrite=overwrite
-                    )
+                path, gid=str(fp.fault_patch_id), overwrite=overwrite
+            )
 
     def save_history(self, path, var=None, var_fault=None, overwrite=False):
         for fp in self.fault_patches:
             fp.save_history(
-                    path, gid=str(fp.fault_patch_id), var=var, overwrite=overwrite
-                    )
+                path, gid=str(fp.fault_patch_id), var=var, overwrite=overwrite
+            )
         if var_fault is None:
             var_fault_pool = self._history_variables
         else:
@@ -1752,19 +1728,18 @@ class RateStateFault(object):
                 if var_fault not in ffault:
                     # initialize data set
                     ffault.create_dataset(
-                            var_fault,
-                            data=time_series,
-                            compression="gzip",
-                            chunks=True,
-                            maxshape=(None,),
-                            )
+                        var_fault,
+                        data=time_series,
+                        compression="gzip",
+                        chunks=True,
+                        maxshape=(None,),
+                    )
                 else:
                     # append to existing data set
                     ffault[var_fault].resize(
-                            ffault[var_fault].shape[0] + len(time_series),
-                            axis=0
-                            )
-                    ffault[var_fault][-len(time_series):] = time_series
+                        ffault[var_fault].shape[0] + len(time_series), axis=0
+                    )
+                    ffault[var_fault][-len(time_series) :] = time_series
 
     def clean_history(self):
         if self.record_history:
@@ -1773,4 +1748,3 @@ class RateStateFault(object):
             self.start_time = self.time[-1]
             for attr in self._history_variables:
                 setattr(self, attr, [getattr(self, attr)[-1]])
-
