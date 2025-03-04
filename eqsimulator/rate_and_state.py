@@ -1373,6 +1373,7 @@ class RateStateFault(object):
                 # unstable patch or conditionally stable
                 if fp.k > fp.critical_stiffness():
                     print(f"Patch {i} is conditionally stable.")
+                    raise("Conditionally stable solutions are not implemented.")
                 fp.stable = False
                 fp.d_dot_0 = np.float64(fp.d_dot)
         # update stressing rates to account for creeping patches
@@ -1398,35 +1399,49 @@ class RateStateFault(object):
         else:
             if fp.state == 0:
                 t0_1 = fp.find_t0_1()
-                t0_3 = fp.find_tX_3()
-                if t0_1 < t0_3:
-                    fp.next_state = 1
-                    transition_time = t0_1
-                else:
-                    fp.next_state = 3
-                    transition_time = t0_3
+                fp.next_state = 1
+                transition_time = t0_1
+                ## ---------------------------------
+                ## for the future, when I implemented conditionally stable behavior
+                #t0_3 = fp.find_tX_3()
+                #if t0_1 < t0_3:
+                #    fp.next_state = 1
+                #    transition_time = t0_1
+                #else:
+                #    fp.next_state = 3
+                #    transition_time = t0_3
+                ## ---------------------------------
             elif fp.state == 1:
                 t1_2 = fp.find_t1_2()
-                t1_3 = fp.find_tX_3()
-                if t1_2 < t1_3:
-                    fp.next_state = 2
-                    transition_time = t1_2
-                else:
-                    fp.next_state = 3
-                    transition_time = t1_3
+                fp.next_state = 2
+                transition_time = t1_2
+                ## ---------------------------------
+                ## for the future, when I implemented conditionally stable behavior
+                #t1_3 = fp.find_tX_3()
+                #if t1_2 < t1_3:
+                #    fp.next_state = 2
+                #    transition_time = t1_2
+                #else:
+                #    fp.next_state = 3
+                #    transition_time = t1_3
             elif fp.state == 2:
                 transition_time = fp.find_t2_0()
                 fp.next_state = 0
             else:
-                t3_1 = fp.find_t3_1()
                 t3_3 = fp.find_t3_V_update(V_V0_ratio=self.V_V0_ratio_for_update)
+                fp.next_state = 3
+                transition_time = t3_3
                 # t3_3 = fp.find_t3_tau_update(num_tc=1.0)
-                if t3_3 < t3_1:
-                    fp.next_state = 3
-                    transition_time = t3_3
-                else:
-                    fp.next_state = 1
-                    transition_time = t3_1
+                ## ---------------------------------
+                ## for the future, when I implemented conditionally stable behavior
+                #t3_1 = fp.find_t3_1()
+                #if t3_3 < t3_1:
+                #    fp.next_state = 3
+                #    transition_time = t3_3
+                #else:
+                #    fp.next_state = 1
+                #    transition_time = t3_1
+                ## ---------------------------------
         fp._transition_time = transition_time
 
     def evolve_next_patch(self):
