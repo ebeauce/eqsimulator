@@ -188,6 +188,10 @@ class RateStateFaultPatch(object):
     def H(self):
         return -self.k / self.normal_stress + self.sum_term
 
+    @property
+    def kc(self):
+        return (self.b - self.a_nominal) * self.normal_stress / self.Dc
+
     def _set_property_based_variables(self):
         self.mu_0_ = np.float64(
             self.mu_0
@@ -1350,7 +1354,7 @@ class RateStateFault(object):
                 # unstable patch or conditionally stable
                 assert (
                     fp.k < fp.critical_stiffness()
-                ), "K_C too low. Conditionally stable solutions are not implemented."
+                    ), f"Patch {i}: K_C too low: K_C/K={fp.kc/fp.k:.2f}. Conditionally stable solutions are not implemented."
                 fp.stable = False
                 fp.d_dot_0 = np.float64(fp.d_dot)
         # update stressing rates to account for creeping patches
