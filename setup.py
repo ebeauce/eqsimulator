@@ -18,7 +18,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="eqsimulator",
-    version="0.0.1",
+    version="1.0.0",
     author="Eric Beauce",
     author_email="ebeauce@ldeo.columbia.edu",
     description="Package for simulating synthetic earthquake catalogs.",

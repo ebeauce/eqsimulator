@@ -6,11 +6,10 @@ from scipy.optimize import fmin, leastsq
 from okada_wrapper import dc3dwrapper
 from time import time as give_time
 
-DELTA_T = 1.0  # time taken before instability to compute the friction
 DECIMAL_PRECISION = 6
 N_POINTS_TIME_SERIES = 2
 DTR = np.float64(np.pi / 180.0)
-rtd = np.float64(180.0 / np.pi)
+RTD = np.float64(180.0 / np.pi)
 
 
 class RateStateFaultPatch(object):
@@ -683,6 +682,8 @@ class RateStateFaultPatch(object):
         return self.a / self.H * (1.0 / self.d_dot - 1.0 / self.d_dot_EQ)
 
     def evolve_state_variable(self, time):
+        if time == 0.:
+            return self.theta
         if self.normal_stress_rate != 0.0:
             t_c = self.normal_stress / self.normal_stress_rate
             C = (self.alpha + self.b) / self.b
@@ -700,32 +701,6 @@ class RateStateFaultPatch(object):
             theta_t = self.theta + time
         return theta_t
 
-    def steady_state_friction(self, time):
-        """Compute the steady state frictional resistance (strength).
-
-        Parameters
-        ----------
-        time : float
-            Elapsed time at which the steady state friction (strength) is computed.
-
-        Returns
-        -------
-        friction_ss : float
-            Value of steady state friction (strength), in Pascals.
-        """
-        theta_t = self.evolve_state_variable(time)
-        friction_ss = self.normal_stress * (
-            self.mu_0
-            + (self.b - self.a_nominal) * np.log(self.d_dot_star / self.Dc)
-            + self.b * np.log(theta_t)
-            + self.a_nominal
-            * np.log(
-                1.0 / theta_t
-                - self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
-            )
-        )
-        return friction_ss
-
     def critical_stiffness(self):
         """
         Returns the critical stiffness below which unstable slip can occur.
@@ -736,7 +711,7 @@ class RateStateFaultPatch(object):
         return (
             self.shear_stress
             + self.shear_stress_rate * t
-            - self.steady_state_friction(t)
+            - self.get_steady_state_friction(t)
         )
 
     def newton_log_f(self, ln_t):
@@ -744,7 +719,7 @@ class RateStateFaultPatch(object):
         return (
             self.shear_stress
             + self.shear_stress_rate * t
-            - self.steady_state_friction(t)
+            - self.get_steady_state_friction(t)
         )
 
     def newton_fprime(self, t):
@@ -791,14 +766,14 @@ class RateStateFaultPatch(object):
         from scipy.optimize import newton
 
         if self.adaptive_rounding(self.shear_stress) > 0.98 * self.adaptive_rounding(
-            self.steady_state_friction(0.0)
+            self.get_steady_state_friction(0.0)
         ):
             # factor 0.98 to relax effects of numerical imprecision
             # could happen because of the instant drop in steady state friction
             # associated with the drop in 'a' on patches neighbors to rupturing patches
             # print(
             #       'Driving stress: {:.2e}MPa, Friction: {:.2e}MPa'.format(
-            #           self.shear_stress / 1.e6, self.steady_state_friction(0.) / 1.e6
+            #           self.shear_stress / 1.e6, self.get_steady_state_friction(0.) / 1.e6
             #           )
             #       )
             return 0.0
@@ -806,7 +781,7 @@ class RateStateFaultPatch(object):
         first_guess_diff = (
             self.shear_stress
             + self.shear_stress_rate * first_guess_time
-            - self.steady_state_friction(first_guess_time)
+            - self.get_steady_state_friction(first_guess_time)
         )
         while first_guess_diff < 0.0:
             first_guess_time *= 10.0
@@ -816,7 +791,7 @@ class RateStateFaultPatch(object):
             first_guess_diff = (
                 self.shear_stress
                 + self.shear_stress_rate * first_guess_time
-                - self.steady_state_friction(first_guess_time)
+                - self.get_steady_state_friction(first_guess_time)
             )
         try:
             t0_1 = newton(
@@ -829,7 +804,7 @@ class RateStateFaultPatch(object):
             # to be much more stable
             Psi = lambda ln_t: (
                 (self.shear_stress + self.shear_stress_rate * np.exp(ln_t))
-                - self.steady_state_friction(np.exp(ln_t))
+                - self.get_steady_state_friction(np.exp(ln_t))
             )
             opt_output, cov = leastsq(Psi, np.log(first_guess_time / 10.0))
             t0_1 = opt_output[0]
@@ -948,14 +923,6 @@ class RateStateFaultPatch(object):
         )  # time to change shear stress of 1%
         return max(2.0e-5, num_tc * characteristic_time)
 
-    # def update_H(self):
-    #    """
-
-    #    Should I recast as a property?
-
-    #    """
-    #    self.H = -self.k / self.normal_stress + self.sum_term
-
     def update_friction(self):
         """
 
@@ -977,20 +944,40 @@ class RateStateFaultPatch(object):
             )
         )
 
-    def set_friction_to_steady_state(self):
-        # self.friction = self.normal_stress * (self.mu_0 + (self.b - self.a_nominal)*np.log(self.theta/self.theta_star))
-        self.friction = self.normal_stress * (
+    def get_steady_state_friction(self, time):
+        """Compute the steady state frictional resistance (strength).
+
+        Parameters
+        ----------
+        time : float
+            Elapsed time at which the steady state friction (strength) is computed.
+
+        Returns
+        -------
+        friction_ss : float
+            Value of steady state friction (strength), in Pascals.
+        """
+        theta_t = self.evolve_state_variable(time)
+        friction_ss = self.normal_stress * (
             self.mu_0
             + (self.b - self.a_nominal) * np.log(self.d_dot_star / self.Dc)
-            + self.b * np.log(self.theta)
+            + self.b * np.log(theta_t)
             + self.a_nominal
             * np.log(
-                1.0 / self.theta
+                1.0 / theta_t
                 - self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
             )
         )
+        return friction_ss
+
+    def set_friction_to_steady_state(self):
+        """Set friction to steady state value.
+        """
+        self.friction = self.get_steady_state_friction(0.)
 
     def set_theta_to_steady_state(self):
+        """Set state variable to steady state value.
+        """
         self.theta = self.adaptive_rounding(
             1.0
             / (
@@ -1000,6 +987,8 @@ class RateStateFaultPatch(object):
         )
 
     def set_slip_speed_to_steady_state(self):
+        """Set slip speed to steady state value.
+        """
         self.d_dot = self.get_steady_state_slip_speed()
 
     def slip_speed_creeping_patch(self, time):
@@ -1045,10 +1034,13 @@ class RateStateFaultPatch(object):
         self.theta *= (sigma_1_2[1] / sigma_1_2[0]) ** -(self.alpha / self.b)
 
     def adaptive_rounding(self, X, precision=DECIMAL_PRECISION):
+        """
+        """
         if X == 0.0 or X != X:
             return X
-        n_decimals = max(int(-np.log10(np.abs(X)) + precision), 1)
+        n_decimals = max(int(-np.log10(np.abs(X)) + precision), 3)
         return np.round(X, n_decimals)
+
 
     # I/O methods
     def save_history(self, path, var=None, gid=None, overwrite=False):
