@@ -500,7 +500,6 @@ class RateStateFaultPatch(object):
         self.set_slip_speed_to_steady_state()
         self.d_dot_state_0 = np.float64(self.d_dot)
         self.state = 1  # state is now 1
-        # print('End of state 0: Friction = {:.2e}MPa, Driving stress = {:.2e}MPa, slip speed = {:.2e}m/s'.format(self.friction/1.e6, self.shear_stress/1.e6, self.d_dot))
 
     def state_1(self, t1_2=None):
         if t1_2 is None:
@@ -512,7 +511,6 @@ class RateStateFaultPatch(object):
             # ----------------------------------
         self.shear_stress += self.shear_stress_rate * t1_2
         self.normal_stress += self.normal_stress_rate * t1_2
-        # print('Current stress state: {:.2e}Pa, Current stressing rate: {:.2e}Pa/s'.format(self.shear_stress, self.shear_stress_rate))
         self.d_dot = self.d_dot_EQ
         self.set_theta_to_steady_state()
         self.set_friction_to_steady_state()
@@ -522,11 +520,7 @@ class RateStateFaultPatch(object):
         self.shear_stress_0 = float(self.shear_stress)
         self._event_timings.append(self.time[-1])
 
-        # print('Driving stress = {:.2e}MPa, friction = {:.2e}MPa'.format(self.shear_stress/1.e6, self.friction/1.e6))
-
     def state_2(self, t2_0=None, verbose=True):
-        # self.d_dot_EQ  = 2. * self.beta * self.Delta_tau / self.lame2
-        # self.Delta_tau = self.shear_stress - self.friction
         # sliding stops when shear_stress = friction (+ some overshooting)
         if t2_0 is None:
             t2_0 = self.find_t2_0()
@@ -574,7 +568,6 @@ class RateStateFaultPatch(object):
         )
         delta_time = total_time - total_time[0]
         displacement = delta_time * self.d_dot
-        # self._time.extend(total_time.tolist())
         self._time_increments.extend(delta_time.tolist())
         self._shear_stress_history.extend(
             list(self._shear_stress_history[-1] + self.shear_stress_rate * delta_time)
@@ -603,7 +596,6 @@ class RateStateFaultPatch(object):
             self.shear_stress += self.shear_stress_rate * duration
             self.normal_stress += self.normal_stress_rate * duration
             if self.state == 0:
-                # self.theta          += duration
                 self.theta = self.evolve_state_variable(duration)
             elif self.state == 1:
                 self.evolve_slip_speed_time_change(duration)
@@ -640,8 +632,6 @@ class RateStateFaultPatch(object):
                     self.state = 0
             elif self.state == 2:
                 self.displacement += duration * self.d_dot_EQ
-                # self.set_theta_to_steady_state()
-                # self.set_friction_to_steady_state() # update necessary if normal stress has changed
             elif self.state == 3:
                 self.d_dot_0 = np.float64(self.d_dot)
                 self.d_dot = min(
@@ -652,7 +642,6 @@ class RateStateFaultPatch(object):
                         / (self.a - self.b)
                     ),
                 )
-            # self.update_H()
             if self.record_history:
                 self.update_history(duration)
 
@@ -712,8 +701,19 @@ class RateStateFaultPatch(object):
         return theta_t
 
     def steady_state_friction(self, time):
+        """Compute the steady state frictional resistance (strength).
+
+        Parameters
+        ----------
+        time : float
+            Elapsed time at which the steady state friction (strength) is computed.
+
+        Returns
+        -------
+        friction_ss : float
+            Value of steady state friction (strength), in Pascals.
+        """
         theta_t = self.evolve_state_variable(time)
-        # friction_ss = (self.normal_stress + self.normal_stress_rate * time) * (self.mu_0 + (self.b - self.a_nominal)*np.log(theta_t/self.theta_star))
         friction_ss = self.normal_stress * (
             self.mu_0
             + (self.b - self.a_nominal) * np.log(self.d_dot_star / self.Dc)
@@ -748,6 +748,10 @@ class RateStateFaultPatch(object):
         )
 
     def newton_fprime(self, t):
+        """First time derive of function whose roots we are seeking.
+
+        THE MATH NEEDS TO BE CHECKED AND DOUBLE CHECKED
+        """
         projected_normal_stress = self.normal_stress + self.normal_stress_rate * t
         projected_normal_stress_MPa = projected_normal_stress / 1.0e6
         sigma_0_MPa = self.normal_stress / 1.0e6
@@ -775,7 +779,7 @@ class RateStateFaultPatch(object):
             self.shear_stress_rate
             - self.normal_stress * self.b * theta_prime / theta_t
             - self.normal_stress
-            * self.a
+            * self.a_nominal
             * theta_prime
             / theta_t**2
             * 1.0
@@ -845,11 +849,6 @@ class RateStateFaultPatch(object):
             t1_2 = self.time_to_instability_stressing_rate()
         else:
             t1_2 = self.time_to_instability()
-
-        # if np.round(t1_2, decimals=DECIMAL_PRECISION) == 0.:
-        #   print(self.shear_stress_rate / 1.e6, self.d_dot, self.d_dot_EQ)
-        # return np.round(t1_2, decimals=DECIMAL_PRECISION)
-        # return self.adaptive_rounding(t1_2)
         return t1_2
 
     def find_t2_0(self):
@@ -1001,13 +1000,7 @@ class RateStateFaultPatch(object):
         )
 
     def set_slip_speed_to_steady_state(self):
-        self.d_dot = self.adaptive_rounding(
-            self.Dc
-            * (
-                1.0 / self.theta
-                - self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
-            )
-        )
+        self.d_dot = self.get_steady_state_slip_speed()
 
     def slip_speed_creeping_patch(self, time):
         new_shear_stress = self.shear_stress + time * self.shear_stress_rate
