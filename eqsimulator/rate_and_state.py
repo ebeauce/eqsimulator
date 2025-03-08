@@ -492,7 +492,7 @@ class RateStateFaultPatch(object):
             self.update_history(t0_1)
             # ----------------------------------
         # self.theta += t0_1
-        self.theta = self.evolve_state_variable(t0_1)
+        self.theta = self.get_state_variable_locked_patch(t0_1)
         self.shear_stress += self.shear_stress_rate * t0_1
         self.normal_stress += self.normal_stress_rate * t0_1
         self.set_friction_to_steady_state()
@@ -554,7 +554,7 @@ class RateStateFaultPatch(object):
             # -------- UPDATE HISTORY ----------
             self.update_history(t3_1)
             # ----------------------------------
-        d_dot_end_step = self.slip_speed_creeping_patch(t3_1)
+        d_dot_end_step = self.get_slip_speed_creeping_patch(t3_1)
         self.shear_stress += self.shear_stress_rate * t3_1
         self.normal_stress += self.normal_stress_rate * t3_1
         self.d_dot = d_dot_end_step
@@ -595,33 +595,19 @@ class RateStateFaultPatch(object):
             self.shear_stress += self.shear_stress_rate * duration
             self.normal_stress += self.normal_stress_rate * duration
             if self.state == 0:
-                self.theta = self.evolve_state_variable(duration)
+                self.theta = self.get_state_variable_locked_patch(duration)
             elif self.state == 1:
                 self.evolve_slip_speed_time_change(duration)
-                # check what is the steady state slip speed
                 self.set_theta_to_steady_state()
-                # if self.d_dot < self.d_dot_state_0:
+                # is slip speed still above steady-state slip speed?
                 if self.d_dot < 0.9 * self.get_steady_state_slip_speed():
                     # factor 0.9 to tolerate small numerical errors when checking condition
                     # go back to state 0, since the assumption about state 1 is that
-                    # slip speed >> steady state slip speed
-                    # self.set_theta_to_steady_state()
-                    # self.update_friction()
-                    # during state 1, the quasi-static approximation still holds, so friction = driving shear stress
+                    #            slip speed >> steady state slip speed
+                    # during state 1, the quasi-static approximation still holds,
+                    # so friction = driving shear stress
                     # knowing the friction and the slip speed, we get the value of theta
-                    # self.theta = np.exp(1./self.b * (self.shear_stress/self.normal_stress - self.mu_0 - self.a_nominal * np.log(self.d_dot/self.d_dot_star))) * self.theta_star
-                    self.theta = self.adaptive_rounding(
-                        np.exp(
-                            1.0
-                            / self.b
-                            * (
-                                self.shear_stress / self.normal_stress
-                                - self.mu_0
-                                - self.a_nominal * np.log(self.d_dot / self.d_dot_star)
-                            )
-                        )
-                        * self.theta_star
-                    )
+                    self.theta = self.get_state_variable_quasi_static()
                     self.friction = self.shear_stress
                     print(
                         "Go back to state 0: Friction = {:.2e}MPa, Driving force = {:.2e}MPa".format(
@@ -633,14 +619,8 @@ class RateStateFaultPatch(object):
                 self.displacement += duration * self.d_dot_EQ
             elif self.state == 3:
                 self.d_dot_0 = np.float64(self.d_dot)
-                self.d_dot = min(
-                    self.d_dot_EQ,
-                    self.d_dot_star
-                    * np.exp(
-                        (self.shear_stress / self.normal_stress - self.mu_0)
-                        / (self.a - self.b)
-                    ),
-                )
+                # here, use time=0 because we updated the stresses just before
+                self.d_dot = self.get_slip_speed_creeping_patch(0.)
             if self.record_history:
                 self.update_history(duration)
 
@@ -648,7 +628,12 @@ class RateStateFaultPatch(object):
         # the initial slip speed fixes the time to instability
         # ------------------------------------------------------
         # solution if instability is defined as slip speed = infinity
-        # return self.a * self.normal_stress/self.shear_stress_rate * np.log(self.shear_stress_rate / (self.H*self.normal_stress*self.d_dot) + 1.)
+        #return (
+        #        self.a * self.normal_stress / self.shear_stress_rate
+        #        * np.log(
+        #            self.shear_stress_rate / (self.H * self.normal_stress * self.d_dot) + 1.
+        #            )
+        #        )
         # ------------------------------------------------------
         # solution if instability is defined as slip speed = d_dot_EQ
         self.coulomb_stress_rate = (
@@ -681,48 +666,23 @@ class RateStateFaultPatch(object):
         # solution if instability is defined as slip speed = d_dot_EQ
         return self.a / self.H * (1.0 / self.d_dot - 1.0 / self.d_dot_EQ)
 
-    def evolve_state_variable(self, time):
-        if time == 0.:
-            return self.theta
-        if self.normal_stress_rate != 0.0:
-            t_c = self.normal_stress / self.normal_stress_rate
-            C = (self.alpha + self.b) / self.b
-            a_ = np.float64(1.0 + time / t_c)
-            if a_ == 1.0:
-                # normal stressing rate is not zero, but time/t_c is still roughly zero
-                return self.theta + time
-            theta_t = t_c / C * (1.0 + time / t_c) + (
-                np.abs(self.normal_stress)
-                / np.abs(self.normal_stress + self.normal_stress_rate * time)
-            ) ** (self.alpha / self.b) * (self.theta - t_c / C)
-            if theta_t < 0.0:
-                return self.theta_star
-        else:
-            theta_t = self.theta + time
-        return theta_t
-
     def critical_stiffness(self):
         """
         Returns the critical stiffness below which unstable slip can occur.
         """
         return (self.b - self.a_nominal) * self.normal_stress / self.Dc
 
-    def newton_f(self, t):
+    # -------------------------------------------------
+    #            Transition times
+    # -------------------------------------------------
+    def _newton_f(self, t):
         return (
             self.shear_stress
             + self.shear_stress_rate * t
             - self.get_steady_state_friction(t)
         )
 
-    def newton_log_f(self, ln_t):
-        t = np.exp(ln_t)
-        return (
-            self.shear_stress
-            + self.shear_stress_rate * t
-            - self.get_steady_state_friction(t)
-        )
-
-    def newton_fprime(self, t):
+    def _newton_fprime(self, t):
         """First time derive of function whose roots we are seeking.
 
         THE MATH NEEDS TO BE CHECKED AND DOUBLE CHECKED
@@ -749,7 +709,7 @@ class RateStateFaultPatch(object):
         else:
             print("Unexpected", self.normal_stress, self.normal_stress_rate, t, c1)
             return 0.0
-        theta_t = self.evolve_state_variable(t)
+        theta_t = self.get_state_variable_locked_patch(t)
         fprime = (
             self.shear_stress_rate
             - self.normal_stress * self.b * theta_prime / theta_t
@@ -761,6 +721,14 @@ class RateStateFaultPatch(object):
             / (theta_t - c1 * self.normal_stress_rate / self.normal_stress)
         )
         return fprime
+
+    def _newton_log_f(self, ln_t):
+        t = np.exp(ln_t)
+        return (
+            self.shear_stress
+            + self.shear_stress_rate * t
+            - self.get_steady_state_friction(t)
+        )
 
     def find_t0_1(self):
         from scipy.optimize import newton
@@ -795,7 +763,7 @@ class RateStateFaultPatch(object):
             )
         try:
             t0_1 = newton(
-                self.newton_log_f,
+                self._newton_log_f,
                 np.log(first_guess_time / 10.0),  # fprime=self.newton_fprime
             )
             t0_1 = np.exp(t0_1)
@@ -911,8 +879,6 @@ class RateStateFaultPatch(object):
         characteristic_time = (
             self.normal_stress * (self.a - self.b) / np.abs(self.shear_stress_rate)
         )
-        # if characteristic_time < (24. * 3600. * 365):
-        #    print("Short t3-3 time:", self.fault_patch_id, characteristic_time / (24. * 3600.), self.shear_stress_rate)
         return max(2.0e-5, np.log(V_V0_ratio) * characteristic_time)
 
     def find_t3_tau_update(self, num_tc=1.0):
@@ -923,24 +889,38 @@ class RateStateFaultPatch(object):
         )  # time to change shear stress of 1%
         return max(2.0e-5, num_tc * characteristic_time)
 
-    def update_friction(self):
-        """
+    # def update_friction(self):
+    #    """
 
-        Should I recast as a property?
+    #    Should I recast as a property?
 
-        """
-        self.friction = self.normal_stress * (
-            self.mu_0
-            + self.a_nominal * np.log(self.d_dot / self.d_dot_star)
-            + self.b * np.log(self.theta / self.theta_star)
-        )
+    #    """
+    #    self.friction = self.normal_stress * (
+    #        self.mu_0
+    #        + self.a_nominal * np.log(self.d_dot / self.d_dot_star)
+    #        + self.b * np.log(self.theta / self.theta_star)
+    #    )
 
+    # -------------------------------------------------
+    #             Steady state values
+    # -------------------------------------------------
     def get_steady_state_slip_speed(self):
+        """Compute steady state slip speed."""
         return self.adaptive_rounding(
             self.Dc
             * (
                 1.0 / self.theta
                 - self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
+            )
+        )
+
+    def get_steady_state_state_variable(self):
+        """Compute steady state state variable."""
+        return self.adaptive_rounding(
+            1.0
+            / (
+                self.d_dot / self.Dc
+                + self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
             )
         )
 
@@ -957,41 +937,46 @@ class RateStateFaultPatch(object):
         friction_ss : float
             Value of steady state friction (strength), in Pascals.
         """
-        theta_t = self.evolve_state_variable(time)
+        theta_t = self.get_state_variable_locked_patch(time)
         friction_ss = self.normal_stress * (
             self.mu_0
-            + (self.b - self.a_nominal) * np.log(self.d_dot_star / self.Dc)
+            + (self.b - self.a) * np.log(self.d_dot_star / self.Dc)
             + self.b * np.log(theta_t)
-            + self.a_nominal
+            + self.a
             * np.log(
                 1.0 / theta_t
                 - self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
             )
         )
+        # friction_ss = self.normal_stress * (
+        #    self.mu_0
+        #    + (self.b - self.a_nominal) * np.log(self.d_dot_star / self.Dc)
+        #    + self.b * np.log(theta_t)
+        #    + self.a_nominal
+        #    * np.log(
+        #        1.0 / theta_t
+        #        - self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
+        #    )
+        # )
         return friction_ss
 
     def set_friction_to_steady_state(self):
-        """Set friction to steady state value.
-        """
-        self.friction = self.get_steady_state_friction(0.)
+        """Set friction to steady state value."""
+        self.friction = self.get_steady_state_friction(0.0)
 
     def set_theta_to_steady_state(self):
-        """Set state variable to steady state value.
-        """
-        self.theta = self.adaptive_rounding(
-            1.0
-            / (
-                self.d_dot / self.Dc
-                + self.alpha * self.normal_stress_rate / (self.b * self.normal_stress)
-            )
-        )
+        """Set state variable to steady state value."""
+        self.theta = self.get_steady_state_state_variable()
 
     def set_slip_speed_to_steady_state(self):
-        """Set slip speed to steady state value.
-        """
+        """Set slip speed to steady state value."""
         self.d_dot = self.get_steady_state_slip_speed()
 
-    def slip_speed_creeping_patch(self, time):
+    # -------------------------------------------------
+    #            Regular state values
+    # -------------------------------------------------
+    def get_slip_speed_creeping_patch(self, time):
+        """Compute slip speed of a creeping patch."""
         new_shear_stress = self.shear_stress + time * self.shear_stress_rate
         new_normal_stress = self.normal_stress + time * self.normal_stress_rate
         return min(
@@ -999,16 +984,53 @@ class RateStateFaultPatch(object):
             self.d_dot_star
             * np.exp(
                 (new_shear_stress / new_normal_stress - self.mu_0)
-                / (self.a_nominal - self.b)
+                / (self.a - self.b)
             ),
         )
 
-    def evolve_slip_speed_time_change(self, time):
+    def get_state_variable_locked_patch(self, time):
+        """Get state variable assuming patch is locked."""
+        if time == 0.0:
+            return self.theta
+        if self.normal_stress_rate != 0.0:
+            t_c = self.normal_stress / self.normal_stress_rate
+            C = (self.alpha + self.b) / self.b
+            a_ = np.float64(1.0 + time / t_c)
+            if a_ == 1.0:
+                # normal stressing rate is not zero, but time/t_c is still roughly zero
+                return self.theta + time
+            theta_t = t_c / C * (1.0 + time / t_c) + (
+                np.abs(self.normal_stress)
+                / np.abs(self.normal_stress + self.normal_stress_rate * time)
+            ) ** (self.alpha / self.b) * (self.theta - t_c / C)
+            if theta_t < 0.0:
+                return self.theta_star
+        else:
+            theta_t = self.theta + time
+        return theta_t
+
+    def get_state_variable_quasi_static(self):
+        """Compute state variable in quasi-static conditions."""
+        return self.adaptive_rounding(
+            np.exp(
+                1.0
+                / self.b
+                * (
+                    self.shear_stress / self.normal_stress
+                    - self.mu_0
+                    - self.a * np.log(self.d_dot / self.d_dot_star)
+                )
+                * self.theta_star
+            )
+        )
+
+    def get_slip_speed_vs_time(self, time):
+        """Compute slip speed at time `t0 + time`."""
         self.coulomb_stress_rate = (
             self.shear_stress_rate - self.mu_effective * self.normal_stress_rate
         )
         if self.coulomb_stress_rate != 0.0:
-            self.d_dot = np.power(
+            d_dot = np.power(
                 (
                     1.0 / self.d_dot
                     + self.H * self.normal_stress / self.coulomb_stress_rate
@@ -1020,27 +1042,47 @@ class RateStateFaultPatch(object):
                 -1.0,
             )
         else:
-            self.d_dot = np.power(1.0 / self.d_dot - self.H * time / self.a, -1.0)
-        # self.d_dot = max(self.d_dot, self.d_dot_star)
-        self.d_dot = self.adaptive_rounding(max(self.d_dot, self.d_dot_star))
+            d_dot = np.power(1.0 / self.d_dot - self.H * time / self.a, -1.0)
+        return self.adaptive_rounding(max(d_dot, self.d_dot_star))
+
+    def evolve_slip_speed_time_change(self, time):
+        """Evolve slip speed following a time step of `time`."""
+        self.d_dot = self.get_slip_speed_vs_time(time)
 
     def evolve_slip_speed_stress_change(self, sigma_1_2, friction_1_2):
+        """Evolve slip speed following a stress step.
+
+        Parameters
+        ----------
+        sigma_1_2: array-like
+            Normal stress step with `sigma_1_2[0]` and `sigma_1_2[1]` the
+            values before and after the step, respectively.
+        friction_1_2: array-like
+            Frictional stress step with `friction_1_2[0]` and `friction_1_2[1]`
+            the values before and after the step, respectively.
+        """
         self.d_dot *= (sigma_1_2[1] / sigma_1_2[0]) ** (self.alpha / self.a) * np.exp(
             friction_1_2[1] / (self.a * sigma_1_2[1])
             - friction_1_2[0] / (self.a * sigma_1_2[0])
         )
 
     def evolve_theta_normal_stress_change(self, sigma_1_2):
+        """Evolve state variable following a stress step.
+
+        Parameters
+        ----------
+        sigma_1_2: array-like
+            Normal stress step with `sigma_1_2[0]` and `sigma_1_2[1]` the
+            values before and after the step, respectively.
+        """
         self.theta *= (sigma_1_2[1] / sigma_1_2[0]) ** -(self.alpha / self.b)
 
     def adaptive_rounding(self, X, precision=DECIMAL_PRECISION):
-        """
-        """
+        """ """
         if X == 0.0 or X != X:
             return X
         n_decimals = max(int(-np.log10(np.abs(X)) + precision), 3)
         return np.round(X, n_decimals)
-
 
     # I/O methods
     def save_history(self, path, var=None, gid=None, overwrite=False):
@@ -1098,14 +1140,6 @@ class RateStateFaultPatch(object):
                     fstate.create_group(gid)
                 fstate = fstate[gid]
             for var in self._mechanical_state_variables:
-                # if overwrite and var in fstate:
-                #    del fstate[var]
-                # if var == "a":
-                #    fstate.create_dataset(var, data=self.a_nominal)
-                # elif var == "start_time":
-                #    fstate.create_dataset(var, data=self.time[-1])
-                # else:
-                #    fstate.create_dataset(var, data=getattr(self, var))
                 if var == "a":
                     var_ = self.a_nominal
                 elif var == "start_time":
@@ -1237,9 +1271,6 @@ class RateStateFault(object):
                     [-fp_j.W / 2, +fp_j.W / 2],
                     [fp_j.strike_slip_component, 0.0, 0.0],
                 )
-                # success, U, grad_U = dc3dwrapper(1., [0., 0., -abs(coords_fault_patches[j,2])], abs(coords_fault_patches[j,2]), \
-                #                                 fp_j.dip_angle, [-fp_j.L/2, +fp_j.L/2], [-fp_j.W/2, +fp_j.W/2], \
-                #                                 [-1., 0., 0.])
                 stress_tensor_fault_j_frame = fp.lame2 * (
                     grad_U + grad_U.T
                 ) + fp.lame1 * np.identity(3) * np.trace(grad_U)
@@ -1339,7 +1370,7 @@ class RateStateFault(object):
                 # unstable patch or conditionally stable
                 assert (
                     fp.k < fp.critical_stiffness()
-                    ), f"Patch {i}: K_C too low: K_C/K={fp.kc/fp.k:.2f}. Conditionally stable solutions are not implemented."
+                ), f"Patch {i}: K_C too low: K_C/K={fp.kc/fp.k:.2f}. Conditionally stable solutions are not implemented."
                 fp.stable = False
                 fp.d_dot_0 = np.float64(fp.d_dot)
         # update stressing rates to account for creeping patches
@@ -1367,7 +1398,7 @@ class RateStateFault(object):
                 fp.next_state = 1
                 transition_time = t0_1
                 ## ---------------------------------
-                ## for the future, when I implemented conditionally stable behavior
+                ## for the future, when I implement conditionally stable behavior
                 # t0_3 = fp.find_tX_3()
                 # if t0_1 < t0_3:
                 #    fp.next_state = 1
@@ -1381,7 +1412,7 @@ class RateStateFault(object):
                 fp.next_state = 2
                 transition_time = t1_2
                 ## ---------------------------------
-                ## for the future, when I implemented conditionally stable behavior
+                ## for the future, when I implement conditionally stable behavior
                 # t1_3 = fp.find_tX_3()
                 # if t1_2 < t1_3:
                 #    fp.next_state = 2
@@ -1398,7 +1429,7 @@ class RateStateFault(object):
                 transition_time = t3_3
                 # t3_3 = fp.find_t3_tau_update(num_tc=1.0)
                 ## ---------------------------------
-                ## for the future, when I implemented conditionally stable behavior
+                ## for the future, when I implement conditionally stable behavior
                 # t3_1 = fp.find_t3_1()
                 # if t3_3 < t3_1:
                 #    fp.next_state = 3
@@ -1543,7 +1574,7 @@ class RateStateFault(object):
                 #    define a new slip speed that satisfies steady state
                 self.fault_patches[i].d_dot = self.fault_patches[
                     i
-                ].slip_speed_creeping_patch(0.0)
+                ].get_slip_speed_creeping_patch(0.0)
                 self.fault_patches[i].set_theta_to_steady_state()
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(3)
@@ -1598,7 +1629,7 @@ class RateStateFault(object):
                 #    define a new slip speed that satisfies steady state
                 self.fault_patches[i].d_dot = self.fault_patches[
                     i
-                ].slip_speed_creeping_patch(0.0)
+                ].get_slip_speed_creeping_patch(0.0)
                 self.fault_patches[i].set_theta_to_steady_state()
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(3)
@@ -1675,8 +1706,6 @@ class RateStateFault(object):
                     continue
                 fp1.shear_stress_rate += self.Kij_shear[i, j] * fp2.d_dot
                 fp1.normal_stress_rate += self.Kij_normal[i, j] * fp2.d_dot
-            # fp1.shear_stress_rate   += np.sum(self.Kij_shear[i,sliping_patches] ) * fp1.d_dot_EQ
-            # fp1.normal_stress_rate  += np.sum(self.Kij_normal[i,sliping_patches]) * fp1.d_dot_EQ
 
     def get_stress_state(self):
         stress = np.zeros(self.n_patches, dtype=np.float64)
