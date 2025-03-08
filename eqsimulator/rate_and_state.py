@@ -1597,7 +1597,7 @@ class RateStateFault(object):
                 for patch in self.fault_patches[i].neighbors:
                     # lower rate-state a parameter to facilitate rupture
                     # propagation, following Richards-Dinger and Dieterich 2012
-                    if patch.state != 3:
+                    if self.fault_patches[patch].state != 3:
                         self.fault_patches[patch].a = (
                             self.a_reduction_factor * self.fault_patches[patch].a_nominal
                         )
