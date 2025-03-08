@@ -877,7 +877,7 @@ class RateStateFaultPatch(object):
         if self.shear_stress_rate == 0.0:
             return np.finfo(np.float64).max
         characteristic_time = (
-            self.normal_stress * (self.a - self.b) / np.abs(self.shear_stress_rate)
+            self.normal_stress * (self.a_nominal - self.b) / np.abs(self.shear_stress_rate)
         )
         return max(2.0e-5, np.log(V_V0_ratio) * characteristic_time)
 
@@ -984,7 +984,7 @@ class RateStateFaultPatch(object):
             self.d_dot_star
             * np.exp(
                 (new_shear_stress / new_normal_stress - self.mu_0)
-                / (self.a - self.b)
+                / (self.a_nominal - self.b)
             ),
         )
 
@@ -1597,9 +1597,10 @@ class RateStateFault(object):
                 for patch in self.fault_patches[i].neighbors:
                     # lower rate-state a parameter to facilitate rupture
                     # propagation, following Richards-Dinger and Dieterich 2012
-                    self.fault_patches[patch].a = (
-                        self.a_reduction_factor * self.fault_patches[patch].a_nominal
-                    )
+                    if patch.state != 3:
+                        self.fault_patches[patch].a = (
+                            self.a_reduction_factor * self.fault_patches[patch].a_nominal
+                        )
                 if self.fault_patches[i].record_history:
                     self.fault_patches[i]._state_history.append(2)
                     self.fault_patches[i]._transition_times_history.append(
@@ -1691,7 +1692,7 @@ class RateStateFault(object):
         v0 = self.fault_patches[evolving_patch_idx].d_dot
         for i in range(self.n_patches):
             self.fault_patches[i].evolve_current_state(t3_3, self, i)
-        delta_d_dot = self.fault_patches[evolving_patch_idx].d_dot - v0
+        #delta_d_dot = self.fault_patches[evolving_patch_idx].d_dot - v0
         # -----------------------
         self.update_stressing_rates()
 
