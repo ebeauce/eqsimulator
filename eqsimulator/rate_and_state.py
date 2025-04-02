@@ -1485,31 +1485,43 @@ class RateStateFault(object):
         print_update_message = True
         for i, evolving_patch_idx in enumerate(evolving_patch_indexes):
             # self.time_jumps = np.hstack((self.time_jumps, times[i]))
-            state_0 = self.fault_patches[evolving_patch_idx].state
+            current_state = self.fault_patches[evolving_patch_idx].state
+            # --------------------------------------------------------
+            #              transition state 0 ---> 1
             if (self.fault_patches[evolving_patch_idx].state == 0) and (
                 self.fault_patches[evolving_patch_idx].next_state == 1
             ):
                 self.update_all_state_01(evolving_patch_idx, times[i])
-                # print('Transition time 0 -> 1 = {:.7e}s'.format(times[i]))
+            # --------------------------------------------------------
+            #              transition state 0 ---> 3
             elif (self.fault_patches[evolving_patch_idx].state == 0) and (
                 self.fault_patches[evolving_patch_idx].next_state == 3
             ):
                 self.update_all_state_03(evolving_patch_idx, times[i])
+            # --------------------------------------------------------
+            #              transition state 1 ---> 2
             elif (self.fault_patches[evolving_patch_idx].state == 1) and (
                 self.fault_patches[evolving_patch_idx].next_state == 2
             ):
                 self.update_all_state_12(evolving_patch_idx, times[i])
+            # --------------------------------------------------------
+            #              transition state 1 ---> 3
             elif (self.fault_patches[evolving_patch_idx].state == 1) and (
                 self.fault_patches[evolving_patch_idx].next_state == 3
             ):
                 self.update_all_state_13(evolving_patch_idx, times[i])
+            # --------------------------------------------------------
+            #              transition state 2 ---> 1
             elif self.fault_patches[evolving_patch_idx].state == 2:
                 self.update_all_state_2(evolving_patch_idx, times[i])
+            # --------------------------------------------------------
+            #              transition state 3 ---> 3
             elif (self.fault_patches[evolving_patch_idx].state == 3) and (
                 self.fault_patches[evolving_patch_idx].next_state == 3
             ):
                 self.update_all_state_33(evolving_patch_idx, times[i])
-                # print_update_message = False
+            # --------------------------------------------------------
+            #              transition state 3 ---> 1
             elif (self.fault_patches[evolving_patch_idx].state == 3) and (
                 self.fault_patches[evolving_patch_idx].next_state == 1
             ):
@@ -1518,7 +1530,7 @@ class RateStateFault(object):
                 print(
                     "Evolving patch {:d} from state {:d} to state {:d} (time = {:.2e}s)".format(
                         evolving_patch_idx,
-                        state_0,
+                        current_state,
                         self.fault_patches[evolving_patch_idx].next_state,
                         times[i],
                     )
@@ -1552,8 +1564,8 @@ class RateStateFault(object):
                     self.fault_patches[i]._transition_times_history.append(
                         self.fault_patches[i].time[-1]
                     )
-                continue
-            self.fault_patches[i].evolve_current_state(t0_1, self, i)
+            else:
+                self.fault_patches[i].evolve_current_state(t0_1, self, i)
 
     def update_all_state_03(self, evolving_patch_idx, t0_3):
         """
@@ -1581,8 +1593,8 @@ class RateStateFault(object):
                     self.fault_patches[i]._transition_times_history.append(
                         self.fault_patches[i].time[-1]
                     )
-                continue
-            self.fault_patches[i].evolve_current_state(t0_3, self, i)
+            else:
+                self.fault_patches[i].evolve_current_state(t0_3, self, i)
         # -----------------------
         self.update_stressing_rates()
 
@@ -1606,8 +1618,8 @@ class RateStateFault(object):
                     self.fault_patches[i]._transition_times_history.append(
                         self.fault_patches[i].time[-1]
                     )
-                continue
-            self.fault_patches[i].evolve_current_state(t1_2, self, i)
+            else:
+                self.fault_patches[i].evolve_current_state(t1_2, self, i)
         # -----------------------
         self.update_stressing_rates()
 
@@ -1637,8 +1649,8 @@ class RateStateFault(object):
                     self.fault_patches[i]._transition_times_history.append(
                         self.fault_patches[i].time[-1]
                     )
-                continue
-            self.fault_patches[i].evolve_current_state(t1_3, self, i)
+            else:
+                self.fault_patches[i].evolve_current_state(t1_3, self, i)
         # -----------------------
         self.update_stressing_rates()
 
@@ -1665,8 +1677,8 @@ class RateStateFault(object):
                     self.fault_patches[i]._transition_times_history.append(
                         self.fault_patches[i].time[-1]
                     )
-                continue
-            self.fault_patches[i].evolve_current_state(t2_0, self, i)
+            else:
+                self.fault_patches[i].evolve_current_state(t2_0, self, i)
         # ---------------------------------------
         self.update_stressing_rates()
 
@@ -1682,8 +1694,8 @@ class RateStateFault(object):
                     self.fault_patches[i]._transition_times_history.append(
                         self.fault_patches[i].time[-1]
                     )
-                continue
-            self.fault_patches[i].evolve_current_state(t3_1, self, i)
+            else:
+                self.fault_patches[i].evolve_current_state(t3_1, self, i)
 
     def update_all_state_33(self, evolving_patch_idx, t3_3):
         """
