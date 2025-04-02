@@ -535,8 +535,15 @@ class RateStateFaultPatch(object):
         stress_drop = self.shear_stress_0 - self.shear_stress
         if verbose:
             print(
-                "Patch {:d}: Displacement EQ = {:.2e}m, Theta = {:.2e}s, Stress-drop = {:.2e}Pa".format(
-                    self.fault_patch_id, self.displacement, self.theta, stress_drop
+                "Patch {:d}: Displacement EQ = {:.2e}m, "\
+                "Theta = {:.2e}s, Stress-drop = {:.2e}Pa, "\
+                "Event duration = {:.2e}s, Slip speed = {:.2f}m/s".format(
+                    self.fault_patch_id,
+                    self.displacement,
+                    self.theta,
+                    stress_drop,
+                    t2_0,
+                    self.d_dot_EQ
                 )
             )
         self.state = 0  # state is now 0
@@ -562,10 +569,10 @@ class RateStateFaultPatch(object):
         self.state = 1
 
     def update_history(self, duration):
-        total_time = np.linspace(
-            self.time[-1], self.time[-1] + duration, N_POINTS_TIME_SERIES
-        )
-        delta_time = total_time - total_time[0]
+        #total_time = np.linspace(
+        #    self.time[-1], self.time[-1] + duration, N_POINTS_TIME_SERIES
+        #)
+        delta_time = np.linspace(0., duration, N_POINTS_TIME_SERIES)
         displacement = delta_time * self.d_dot
         self._time_increments.extend(delta_time.tolist())
         self._shear_stress_history.extend(
