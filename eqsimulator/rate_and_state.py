@@ -1119,6 +1119,12 @@ class RateStateFaultPatch(object):
                     )
                 else:
                     # append to existing data set
+                    # note: the first element of `time_series` was already
+                    # stored into the database before the last call of
+                    # `self.clean_history`
+                    if len(time_series) == 1:
+                        continue
+                    time_series = time_series[1:]
                     fhist[var].resize(fhist[var].shape[0] + len(time_series), axis=0)
                     fhist[var][-len(time_series) :] = time_series
 
@@ -1774,6 +1780,10 @@ class RateStateFault(object):
                     )
                 else:
                     # append to existing data set
+                    # note: the first element of `time_series` was already
+                    # stored into the database before the last call of
+                    # `self.clean_history`
+                    time_series = time_series[1:]
                     ffault[var_fault].resize(
                         ffault[var_fault].shape[0] + len(time_series), axis=0
                     )
