@@ -356,6 +356,7 @@ class RateStateFaultPatch(object):
         start_time=0.0,
         path=None,
         gid=None,
+        verbose=False
     ):
         # ------------------------------------------
         #       mechanical state variables
@@ -381,7 +382,8 @@ class RateStateFaultPatch(object):
                     fstate = fstate[gid]
                 for var in self._mechanical_state_variables:
                     setattr(self, var, fstate[var][()])
-                    print(var, getattr(self, var))
+                    if verbose:
+                        print(var, getattr(self, var))
         else:
             self.state = state
             self.a = self.a_nominal
@@ -1185,7 +1187,6 @@ class RateStateFault(object):
         else:
             with h5.File(path, mode="r") as fprop:
                 gids = list(fprop.keys())
-                print(gids)
             self.fault_patches = [
                 RateStateFaultPatch(
                     path=path, gid=gids[i], record_history=record_history
