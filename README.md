@@ -12,3 +12,6 @@ Earthquake simulator using inter-connected rate-and-state spring-sliders with lo
 <img src="data/example.png" width=800>
 </p><br><br><br><br>
 
+
+!!!! WORK-IN-PROGRESS !!!!<br>
+I am currently working on writing the doc strings and cleaning up the functions that I haven't used in a long time.
