@@ -408,7 +408,7 @@ class RateStateFaultPatch(object):
             self.start_time = 0.0
 
     def initialize_history(
-        self, path=None, readall=False, gid=None, history_variables=None
+        self, path=None, readall=False, gid=None, history_variables=None, verbose=True
     ):
         # --------------------------------------------------
         #                  history
@@ -464,14 +464,16 @@ class RateStateFaultPatch(object):
                 for var in self._history_variables:
                     var = var[1:]
                     if var not in fhist:
-                        print(f"Could not find {var} in the file!")
+                        if verbose:
+                            print(f"Could not find {var} in the file!")
                         continue
                     if readall:
                         setattr(self, f"_{var}", fhist[var][()])
-                        print(
-                            "!! Make sure you are not using readall=True to"
-                            " restart a simulation from the last checkpoint !!"
-                        )
+                        if verbose:
+                            print(
+                                "!! Make sure you are not using readall=True to"
+                                " restart a simulation from the last checkpoint !!"
+                            )
                     else:
                         setattr(self, f"_{var}", [fhist[var][-1]])
                 if hasattr(self, "_time_increments"):
