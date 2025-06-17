@@ -89,7 +89,11 @@ def get_event_history(fault):
 
     list_events = []
     for n in range(fault.n_patches):
-        for k in range(fault.fault_patches[n].event_slips.size):
+        num_events = min(
+            len(fault.fault_patches[n].event_timings),
+            len(fault.fault_patches[n].event_stress_drops),
+        )
+        for k in range(num_events):
             list_events.append(
                 [
                     fault.fault_patches[n].event_timings[k],
@@ -97,8 +101,9 @@ def get_event_history(fault):
                     fault.fault_patches[n].x,
                     fault.fault_patches[n].y,
                     fault.fault_patches[n].z,
-                    fault.fault_patches[n].event_slips[k],
+                    # fault.fault_patches[n]._coseismic_displacements[k],
                     fault.fault_patches[n].event_stress_drops[k],
+                    fault.fault_patches[n].event_slips[k],
                 ]
             )
     list_events = sorted(list_events)  # order the list in chronological order
@@ -106,8 +111,9 @@ def get_event_history(fault):
     catalog = catalog[catalog[:, -1] > 0.0, :]
     catalog = pd.DataFrame(
         data=np.asarray(catalog),
-        columns=["event_time", "patch_id", "x", "y", "z", "slip", "stress_drop"],
+        columns=["event_time", "patch_id", "x", "y", "z", "stress_drop", "slip"],#, "stress_drop"],
     )
+    catalog["patch_id"] = catalog["patch_id"].astype(int)
     return catalog
 
 
